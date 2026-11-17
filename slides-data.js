@@ -14,7 +14,7 @@ window.STOPS = [
   { id: "america", name: "América", period: "Encuentros en la región", coordinates: [-58.38, -34.6], description: "Buenos Aires, Lima, Tacna y más encuentros.", label: "Buenos Aires", country: "Argentina" },
   { id: "boulder", name: "Boulder", period: "2022—2026", coordinates: [-105.27, 40.01], description: "CIRES, CU Boulder y NOAA GML.", label: "Boulder", country: "Estados Unidos" },
   { id: "eeuu", name: "EE. UU.", period: "2022—2025", coordinates: [-87.63, 41.88], description: "Los congresos también hacen camino.", label: "Chicago", country: "Estados Unidos" },
-  { id: "maryland", name: "Maryland", period: "Desde 2026", coordinates: [-76.94, 38.99], description: "CISESS, University of Maryland y NOAA ARL.", label: "Maryland", country: "Estados Unidos" },
+  { id: "maryland", name: "Maryland", period: "Desde 2026", coordinates: [-76.94, 38.99], description: "CISESS / ESSIC, University of Maryland y NOAA ARL.", label: "Maryland", country: "Estados Unidos" },
   { id: "regreso", name: "Volver", period: "UTEM · 2026", coordinates: [-70.65, -33.45], description: "Compartir el camino y pensar en lo que viene.", label: "Santiago", country: "Chile" },
 ];
 
@@ -204,10 +204,10 @@ window.SLIDES = [
   },
   {
     id: "maryland", stop: "maryland", eyebrow: "EL PRESENTE", period: "Desde marzo de 2026", title: "Seguir haciendo<br><em>preguntas.</em>",
-    text: "Visiting Assistant Research Scientist en CISESS, University of Maryland, trabajando con NOAA Air Resources Laboratory.",
+    text: "Visiting Assistant Research Scientist en CISESS, dentro de ESSIC, University of Maryland, trabajando con NOAA Air Resources Laboratory.",
     details: [{ label: "Hoy", text: "Estudiar cuándo y dónde se pueden detectar inyecciones de aerosoles en la estratósfera." }, { label: "Código abierto", text: "Desarrollo y mantenimiento de hysplit-strato y wondersnap." }],
-    visual: "globe", atlasTitle: "Maryland", atlasSubtitle: "CISESS / University of Maryland · NOAA ARL",
-    notes: "Aclara la afiliación actual y la fecha de inicio: marzo de 2026. Cuenta qué te interesa del problema actual. En el archivo de viajes está Fairfax, donde presentaste este trabajo en junio de 2026. Foto sugerida: laboratorio o equipo.",
+    visual: "globe", atlasTitle: "Maryland", atlasSubtitle: "CISESS / ESSIC / University of Maryland · NOAA ARL",
+    notes: "Aclara la afiliación actual: CISESS, dentro de ESSIC, University of Maryland, con NOAA ARL. La fecha de inicio es marzo de 2026. Cuenta qué te interesa del problema actual. En el archivo de viajes está Fairfax, donde presentaste este trabajo en junio de 2026. Foto sugerida: laboratorio o equipo.",
   },
   {
     id: "estratosfera", stop: "maryland", eyebrow: "UNA PREGUNTA A ESCALA GLOBAL", period: "Investigación en curso", title: "De las calles a<br><em>la estratósfera.</em>",
@@ -262,7 +262,7 @@ window.TRIPS = [
   { id: "new-orleans", city: "Nueva Orleans", country: "Estados Unidos", region: "EE. UU.", period: "2025", coordinates: [-90.07, 29.95], event: "AGU Fall Meeting: un siglo de emisiones en Brasil y metano en Estados Unidos.", slideId: "new-orleans" },
   { id: "fort-collins", city: "Fort Collins", country: "Estados Unidos", region: "EE. UU.", period: "2025", coordinates: [-105.08, 40.57], event: "Foundation Models for the Atmosphere Workshop, Colorado State University, 18–21 de agosto.", topics: ["Formación en modelos fundacionales para la atmósfera"] },
   { id: "fairfax", city: "Fairfax", country: "Estados Unidos", region: "EE. UU.", period: "2026", coordinates: [-77.31, 38.85], event: "30th Annual George Mason University Conference on Atmospheric Transport and Dispersion Modeling, 10–11 de junio.", topics: ["Evaluación de una red global de sondeos para detectar aerosoles estratosféricos"] },
-  { id: "maryland", city: "College Park · Maryland", country: "Estados Unidos", region: "EE. UU.", period: "Desde 2026", coordinates: [-76.94, 38.99], event: "CISESS / University of Maryland y NOAA Air Resources Laboratory.", slideId: "maryland" },
+  { id: "maryland", city: "College Park · Maryland", country: "Estados Unidos", region: "EE. UU.", period: "Desde 2026", coordinates: [-76.94, 38.99], event: "CISESS, dentro de ESSIC, University of Maryland y NOAA Air Resources Laboratory.", slideId: "maryland" },
   { id: "new-york", city: "Nueva York", country: "Estados Unidos", region: "EE. UU.", period: "Archivo personal", coordinates: [-74.01, 40.71], event: "Un recuerdo de viaje, fuera del laboratorio.", images: [{ src: "assets/sergio_nyc.jpg", alt: "Sergio en Nueva York.", caption: "Nueva York · Archivo personal" }, { src: "assets/sergio_liberty.jpg", alt: "Sergio junto a la Estatua de la Libertad.", caption: "Liberty Island · Archivo personal" }] },
 ];
 

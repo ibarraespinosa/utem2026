@@ -123,7 +123,7 @@
 
     if (slide.type === 'cover') {
       content += `
-        <div class="cover-author"><img src="assets/photos/profile.jpg" alt="" width="45" height="45"><div><strong>Dr. Sergio Ibarra-Espinosa</strong><p>CISESS · University of Maryland<br>NOAA Air Resources Laboratory</p></div></div>
+        <div class="cover-author"><img src="assets/photos/profile.jpg" alt="" width="45" height="45"><div><strong>Dr. Sergio Ibarra-Espinosa</strong><p>CISESS · ESSIC · University of Maryland<br>NOAA Air Resources Laboratory</p></div></div>
         <div class="cover-actions"><button class="primary-button" data-slide="1">Comenzar el viaje ${icon('arrow')}</button><div class="cover-event"><strong>17 noviembre 2026</strong>Campus Ñuñoa · Santiago</div></div>`;
     } else {
       if (slide.details?.length) content += `<ul class="slide-details">${slide.details.map(detail => `<li><span class="detail-label">${escape(detail.label)}</span><span class="detail-text">${escape(detail.text)}</span></li>`).join('')}</ul>`;

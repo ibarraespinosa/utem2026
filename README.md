@@ -1,6 +1,6 @@
 # De la UTEM para el mundo
 
-Presentación de **Dr. Sergio Ibarra-Espinosa**, Ingeniero en Prevención de Riesgos y Medio Ambiente de la UTEM y Visiting Assistant Research Scientist en CISESS, University of Maryland, con NOAA Air Resources Laboratory.
+Presentación de **Dr. Sergio Ibarra-Espinosa**, Ingeniero en Prevención de Riesgos y Medio Ambiente de la UTEM y Visiting Assistant Research Scientist en CISESS, dentro de ESSIC, University of Maryland, con NOAA Air Resources Laboratory.
 
 **[Abrir la presentación](https://ibarraespinosa.github.io/utem2026/)**
 
