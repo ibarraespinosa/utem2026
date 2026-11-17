@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>De la UTEM para el Mundo — Dr. Sergio Ibarra-Espinosa (2026)</title>
+  <meta name="description" content="Charla de UTEM para el mundo: Trayectoria de un Ingeniero en Prevención de Riesgos y Medio Ambiente — Dr. Sergio Ibarra-Espinosa (CISESS / University of Maryland & NOAA ARL)" />
+
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Leaflet 1.9.4 for Interactive World Flight Map -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+
+  <!-- Custom Styles -->
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+
+  <!-- TOP FLIGHT HUD HEADER -->
+  <header class="hud-header">
+    <div class="brand-cluster">
+      <div class="utem-badge">
+        <span>✈️ UTEM → MUNDO</span>
+      </div>
+      <div class="talk-meta">
+        <div class="talk-title-top">De la UTEM para el Mundo: Trayectoria de un Ing. en Prevención de Riesgos y Medio Ambiente</div>
+        <div class="talk-sub-top">Dr. Sergio Ibarra-Espinosa · CISESS / Univ. of Maryland &amp; NOAA ARL · Campus Ñuñoa, 17 Nov 2026</div>
+      </div>
+    </div>
+
+    <div class="telemetry-bar">
+      <div class="telemetry-item">
+        <span class="telemetry-label">Estación</span>
+        <span class="telemetry-val amber" id="telCode">SCL / UTEM</span>
+      </div>
+      <div class="telemetry-item">
+        <span class="telemetry-label">Etapa</span>
+        <span class="telemetry-val" id="telPeriod">2003 – 2007</span>
+      </div>
+      <div class="telemetry-item">
+        <span class="telemetry-label">Vuelo Acumulado</span>
+        <span class="telemetry-val emerald" id="telDist">0 km</span>
+      </div>
+    </div>
+
+    <div class="hud-controls">
+      <button class="hud-btn mode-btn active" data-mode="split" title="Vista Dividida: Mapa + Diapositiva (Tecla M)">
+        🗺️+📊 Split
+      </button>
+      <button class="hud-btn mode-btn" data-mode="slide" title="Modo Auditorio: Diapositiva 100% (Tecla M)">
+        🖥️ Slide 100%
+      </button>
+      <button class="hud-btn mode-btn" data-mode="map" title="Explorar Mapa Mundial 100% (Tecla M)">
+        🌍 Mapa 100%
+      </button>
+      <button class="hud-btn" id="notesToggleBtn" title="Ver Notas de Orador (Tecla N)">
+        📝 Notas
+      </button>
+      <button class="hud-btn" id="fullscreenBtn" title="Pantalla Completa (Tecla F)">
+        ⛶ Full
+      </button>
+    </div>
+  </header>
+
+  <!-- INTERACTIVE ROUTE RIBBON (10 STOPS) -->
+  <nav class="route-ribbon" id="routeRibbon" aria-label="Paradas de la trayectoria"></nav>
+
+  <!-- MAIN SPLIT / FULL STAGE -->
+  <main class="stage-container" id="stageContainer">
+    <!-- LEFT: INTERACTIVE WORLD FLIGHT MAP -->
+    <section class="map-panel" aria-label="Mapa de vuelo mundial">
+      <div id="worldMap"></div>
+
+      <div class="map-overlay-card">
+        <div class="map-stop-info">
+          <div class="map-stop-tag" id="mapStopTag">PARADA 1 DE 10 · 2003–2007</div>
+          <div class="map-stop-name" id="mapStopName">Campus Ñuñoa, Santiago, Chile</div>
+          <div class="map-stop-coords" id="mapStopCoords">UTEM · Ingeniería en Prevención de Riesgos y Medio Ambiente</div>
+        </div>
+        <div class="map-quick-actions">
+          <button class="hud-btn" onclick="window.showWorldOverview()" title="Ver todas las rutas del mundo">
+            🌐 Ver Mundo Completo
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- RIGHT: SCIENTIFIC & JOURNEY SLIDE DECK -->
+    <section class="slide-panel" id="slideStage" aria-live="polite"></section>
+  </main>
+
+  <!-- BOTTOM NAVIGATION DECK BAR -->
+  <footer class="bottom-deck-bar">
+    <div class="progress-wrap">
+      <div class="progress-track">
+        <div class="progress-fill" id="progressFill" style="width: 6%;"></div>
+      </div>
+      <span class="slide-counter" id="slideCounter">Slide 1 / 17</span>
+    </div>
+
+    <div style="font-size:0.75rem;color:#94a3b8;font-family:var(--font-mono);" class="key-hints">
+      Atajos: <strong>← / →</strong> Cambiar Slide · <strong>↓</strong> Siguiente País/Parada · <strong>M</strong> Modo Vista · <strong>N</strong> Notas · <strong>F</strong> Pantalla Completa
+    </div>
+
+    <div class="nav-btn-group">
+      <button class="nav-btn" id="prevSlideBtn">← Anterior</button>
+      <button class="nav-btn primary" id="nextSlideBtn">Siguiente Slide →</button>
+      <button class="nav-btn fly-next" id="nextStopBtn" title="Volar al siguiente destino del mapa">
+        ✈️ Volar a Siguiente Parada
+      </button>
+    </div>
+  </footer>
+
+  <!-- SPEAKER NOTES DRAWER -->
+  <aside class="notes-drawer" id="notesDrawer">
+    <div class="notes-header">
+      <span>🎙️ Notas del Expositor (Tecla N)</span>
+      <button class="hud-btn" onclick="document.getElementById('notesDrawer').classList.remove('open')" style="padding:2px 8px;">✕</button>
+    </div>
+    <div class="notes-body" id="notesBody"></div>
+  </aside>
+
+  <!-- FULLSCREEN FIGURE LIGHTBOX MODAL -->
+  <div class="lightbox-modal" id="lightboxModal" onclick="window.closeLightbox()">
+    <img id="lightboxImg" src="" alt="Figura científica ampliada" />
+    <div class="lightbox-caption" id="lightboxCaption"></div>
+    <button class="hud-btn" style="margin-top:14px;" onclick="window.closeLightbox()">✕ Cerrar Vista Ampliada (Esc)</button>
+  </div>
+
+  <!-- Scripts -->
+  <script src="slides-data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
