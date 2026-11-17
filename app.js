@@ -1,1307 +1,536 @@
-// Motor interactivo de vuelo global, control de diapositivas y simuladores científicos
-// Dr. Sergio Ibarra-Espinosa — UTEM 2026
-
-(function () {
-  let currentSlideIdx = 0;
-  let currentStopId = null;
-  let layoutMode = "split"; // "split" | "slide" | "map"
-  let map = null;
-  let stopMarkers = {};
-  let flightLines = [];
-  let activeArcLine = null;
-  let planeMarker = null;
-  let animFrameId = null;
-
-  const stops = window.FLIGHT_STOPS;
+(() => {
+  'use strict';
+  const $ = id => document.getElementById(id);
   const slides = window.SLIDES;
+  const stops = window.STOPS;
+  const trips = window.TRIPS;
+  const escape = value => String(value ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  const plain = value => String(value ?? '').replace(/<br\s*\/?\s*>/gi, ' ').replace(/<[^>]*>/g, '');
+  const titleHTML = value => escape(value).replace(/&lt;br\s*\/?&gt;/gi, '<br>').replace(/&lt;(\/?em)&gt;/gi, '<$1>');
+  const searchable = value => plain(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLocaleLowerCase('es');
+  const icon = name => `<svg class="icon" aria-hidden="true"><use href="#i-${name}" /></svg>`;
+  const number = value => String(value).padStart(2, '0');
+  const institutions = {
+    usp: { src: 'assets/logos/usp.png', name: 'Universidade de São Paulo', className: 'wide-logo dark-logo' },
+    uchile: { src: 'assets/logos/uchile.svg', name: 'Universidad de Chile', className: 'dark-logo' },
+    colorado: { src: 'assets/logos/colorado.svg', name: 'University of Colorado Boulder', className: 'dark-logo' },
+    umd: { src: 'assets/logos/umd.svg', name: 'University of Maryland', className: 'wide-logo' },
+    noaa: { src: 'assets/logos/noaa.webp', name: 'National Oceanic and Atmospheric Administration', className: 'noaa-logo' },
+    cas: { src: 'assets/logos/cas.png', name: 'Chinese Academy of Sciences', className: 'wide-logo' },
+  };
+  let currentIndex = 0;
+  let currentTrip = null;
+  let currentImage = 0;
+  let previousLocation = null;
+  let travelTimer;
+  let toastTimer;
+  let globe;
+  const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+  let reducedMotion = motionPreference.matches;
+  let savedMotion = null;
+  let currentFilter = 'Todos';
+  let routeView = 'story';
+  let routeQuery = '';
+  let lightboxImages = [];
+  let lightboxIndex = 0;
+  let notesReturnFocus;
 
-  // Helpers
-  function getStopById(id) {
-    return stops.find((s) => s.id === id) || stops[0];
+  // Storage is optional, including when the presentation is opened as a local file.
+  try {
+    const value = localStorage.getItem('utem-reduced-motion');
+    if (value === 'true' || value === 'false') savedMotion = value === 'true';
+    reducedMotion = savedMotion ?? reducedMotion;
+  } catch { /* Private browsing can disable storage. */ }
+  document.body.classList.toggle('reduce-motion', reducedMotion);
+  $('motionToggle').checked = reducedMotion;
+
+  const stopFor = slide => stops.find(stop => stop.id === slide.stop) || stops[0];
+  const locationFor = slide => slide.location || stopFor(slide);
+  const chapterSlides = stop => slides.map((slide, index) => ({ slide, index })).filter(item => item.slide.stop === stop && item.slide.type !== 'cover');
+  const indexForStop = id => slides.findIndex(slide => slide.id === stops.find(stop => stop.id === id)?.slideId);
+  const imageCaption = image => `${escape(image.caption)}${image.credit && image.creditUrl ? ` · <a href="${escape(image.creditUrl)}" target="_blank" rel="noopener">${escape(image.credit)}</a>` : ''}`;
+
+  function tripSlide(trip) {
+    const linked = slides.find(slide => slide.id === trip.slideId);
+    const nearby = stops.find(stop => stop.coordinates.every((value, i) => value === trip.coordinates[i]) && stop.id !== stops[0].id);
+    return {
+      id: `archivo-${trip.id}`,
+      stop: linked?.stop || nearby?.id,
+      eyebrow: 'CUADERNO DE VIAJES', period: trip.period,
+      title: `<em>${trip.city}.</em>`, text: trip.event,
+      location: { coordinates: trip.coordinates, label: trip.city, country: trip.country },
+      details: trip.topics?.map((text, index) => ({ label: index ? 'También' : 'La investigación', text })),
+      visual: 'globe', atlasTitle: trip.city, atlasSubtitle: `${trip.country} · ${trip.period}`,
+      images: trip.images || linked?.images,
+      approximate: trip.approximate,
+      notes: linked?.notes || `Una parada del archivo de viajes. ${trip.event} Cuenta un recuerdo del encuentro o de las personas que te acompañaron.`,
+    };
   }
 
-  function getStopIndex(id) {
-    return stops.findIndex((s) => s.id === id);
+  function activeSlide() { return currentTrip ? tripSlide(currentTrip) : slides[currentIndex]; }
+
+  function writeHash(hash, replace = false) {
+    if (location.hash === `#${hash}`) return;
+    try { history[replace ? 'replaceState' : 'pushState'](null, '', `#${hash}`); }
+    catch { location.hash = hash; }
   }
 
-  function getSlidesForStop(stopId) {
-    return slides
-      .map((s, idx) => ({ slide: s, index: idx }))
-      .filter((item) => item.slide.stopId === stopId);
+  function goToSlide(index, { updateHash = true, animate = true } = {}) {
+    if (!Number.isInteger(index) || index < 0 || index >= slides.length) return;
+    currentIndex = index;
+    currentTrip = null;
+    currentImage = 0;
+    if (updateHash) writeHash(slides[index].id);
+    renderNavigation(animate);
   }
 
-  // Format simple inline math expressions like \text{PM}_{2.5} or formulas nicely
-  function formatMathText(str) {
-    if (!str) return "";
-    return str
-      .replace(/\$\\text\{([^}]+)\}_\{([^}]+)\}\$/g, "<strong>$1<sub>$2</sub></strong>")
-      .replace(/\$\\text\{([^}]+)\}\$/g, "<strong>$1</strong>")
-      .replace(/\\text\{([^}]+)\}_\{([^}]+)\}/g, "$1<sub>$2</sub>")
-      .replace(/\\text\{([^}]+)\}/g, "$1")
-      .replace(/\$([^$]+)\$/g, (_, expr) => {
-        return "<code style='color:#7dd3fc;font-family:var(--font-mono);'>" +
-          expr
-            .replace(/\\ge/g, "≥")
-            .replace(/\\le/g, "≤")
-            .replace(/\\times/g, "×")
-            .replace(/\\rightarrow/g, "→")
-            .replace(/\\mu/g, "μ")
-            .replace(/\^\\circ/g, "°")
-            .replace(/_\{([^}]+)\}/g, "<sub>$1</sub>")
-            .replace(/\^\{([^}]+)\}/g, "<sup>$1</sup>")
-            .replace(/_([a-zA-Z0-9]+)/g, "<sub>$1</sub>")
-            .replace(/\^([a-zA-Z0-9+-]+)/g, "<sup>$1</sup>") +
-          "</code>";
-      });
+  function showTrip(id, { updateHash = true, animate = true } = {}) {
+    const trip = trips.find(item => item.id === id);
+    if (!trip) return;
+    currentTrip = trip;
+    currentImage = 0;
+    if (updateHash) writeHash(`archivo-${trip.id}`);
+    renderNavigation(animate);
   }
 
-  function formatFormulaBlock(formula) {
-    if (!formula) return "";
-    return formula
-      .replace(/\\hat\{\\mathbf\{([^}]+)\}\}/g, "<strong>$1̂</strong>")
-      .replace(/\\mathbf\{([^}]+)\}/g, "<strong>$1</strong>")
-      .replace(/\\text\{([^}]+)\}/g, "$1")
-      .replace(/\\mathbb\{I\}/g, "𝕀")
-      .replace(/\\sum_\{([^}]+)\}/g, "∑<sub>$1</sub>")
-      .replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1) / ($2)")
-      .replace(/\\left\(/g, "(")
-      .replace(/\\right\)/g, ")")
-      .replace(/\\cdot/g, "·")
-      .replace(/\\ge/g, "≥")
-      .replace(/\\theta/g, "θ")
-      .replace(/\\gamma/g, "γ")
-      .replace(/\\psi/g, "ψ")
-      .replace(/_\{([^}]+)\}/g, "<sub>$1</sub>")
-      .replace(/\^\{([^}]+)\}/g, "<sup>$1</sup>")
-      .replace(/_([a-zA-Z0-9]+)/g, "<sub>$1</sub>")
-      .replace(/\^([a-zA-Z0-9T+-]+)/g, "<sup>$1</sup>");
+  function renderNavigation(animate) {
+    const focused = document.activeElement;
+    const fromDialog = Boolean(focused?.closest('dialog'));
+    closeDialogs();
+    render(animate);
+    if (fromDialog || !focused?.isConnected) $('story').focus({ preventScroll: true });
   }
 
-  // Generate curved geodesic points between two [lat, lng] coordinates
-  function getCurvedArc(start, end, numPoints = 80) {
-    const lat1 = start[0], lng1 = start[1];
-    const lat2 = end[0], lng2 = end[1];
-    const dLat = lat2 - lat1;
-    const dLng = lng2 - lng1;
-    const dist = Math.hypot(dLat, dLng);
-    // Offset perpendicular for visual flight arc curvature
-    const curveHeight = Math.min(dist * 0.18, 22);
-    const points = [];
-    for (let i = 0; i <= numPoints; i++) {
-      const t = i / numPoints;
-      const lat = lat1 + dLat * t + Math.sin(Math.PI * t) * curveHeight * 0.65;
-      const lng = lng1 + dLng * t;
-      points.push([lat, lng]);
-    }
-    return points;
+  function step(direction) {
+    if (currentTrip) {
+      const index = trips.indexOf(currentTrip) + direction;
+      if (index >= 0 && index < trips.length) showTrip(trips[index].id);
+    } else goToSlide(currentIndex + direction);
   }
 
-  // Initialize Leaflet World Map
-  function initMap() {
-    map = L.map("worldMap", {
-      center: [-33.4627, -70.5975],
-      zoom: 4,
-      zoomControl: false,
-      attributionControl: false
-    });
-
-    L.control.zoom({ position: "topright" }).addTo(map);
-
-    // Dark atmospheric map tiles (CartoDB Dark Matter)
-    L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-      subdomains: "abcd",
-      maxZoom: 18
-    }).addTo(map);
-
-    // Draw full background flight network between consecutive stops
-    for (let i = 0; i < stops.length - 1; i++) {
-      const arcPts = getCurvedArc(stops[i].coords, stops[i + 1].coords, 60);
-      const line = L.polyline(arcPts, {
-        color: "#38bdf8",
-        weight: 2,
-        opacity: 0.32,
-        dashArray: "6, 8"
-      }).addTo(map);
-      flightLines.push(line);
-    }
-
-    // Create interactive stop markers
-    stops.forEach((stop, idx) => {
-      const icon = L.divIcon({
-        className: "custom-stop-marker",
-        html: `<div class="marker-pin" id="pin-${stop.id}" title="${stop.shortName}">${stop.number}</div>`,
-        iconSize: [36, 36],
-        iconAnchor: [18, 18]
-      });
-
-      const marker = L.marker(stop.coords, { icon }).addTo(map);
-      marker.bindTooltip(
-        `<div style="font-family:sans-serif;padding:3px 6px;">
-          <strong style="color:#0284c7;">${stop.shortName}</strong><br/>
-          <span>${stop.city}</span><br/>
-          <small style="color:#64748b;">${stop.period}</small>
-        </div>`,
-        { direction: "top", offset: [0, -14] }
-      );
-
-      marker.on("click", () => {
-        const stopSlides = getSlidesForStop(stop.id);
-        if (stopSlides.length > 0) {
-          goToSlide(stopSlides[0].index);
-        }
-      });
-
-      stopMarkers[stop.id] = marker;
-    });
-
-    // Create animated airplane marker
-    const planeIcon = L.divIcon({
-      className: "plane-marker-icon",
-      html: `<div id="planeGlyph" style="transform:rotate(0deg);">✈️</div>`,
-      iconSize: [32, 32],
-      iconAnchor: [16, 16]
-    });
-    planeMarker = L.marker(stops[0].coords, { icon: planeIcon, zIndexOffset: 1000 }).addTo(map);
+  function stepChapter(direction) {
+    if (currentTrip) { step(direction); return; }
+    const stopIndex = stops.findIndex(stop => stop.id === activeSlide().stop);
+    const next = stops[stopIndex + direction];
+    if (next) goToSlide(indexForStop(next.id));
   }
 
-  // Animate plane between two stops
-  function animateFlightToStop(prevStop, nextStop) {
-    if (!map) return;
+  function renderStory(slide) {
+    let content = `
+      <div class="slide-meta"><span class="meta-line"></span><span>${escape(slide.eyebrow)}</span>${slide.period ? `<span class="period">${escape(slide.period)}</span>` : ''}</div>
+      <h1 class="slide-title" id="slideTitle">${titleHTML(slide.title)}</h1>
+      <p class="slide-description">${escape(slide.text)}</p>`;
 
-    // Update marker highlight classes
-    stops.forEach((s) => {
-      const pin = document.getElementById(`pin-${s.id}`);
-      if (pin) {
-        pin.classList.toggle("active", s.id === nextStop.id);
+    if (slide.type === 'cover') {
+      content += `
+        <div class="cover-author"><img src="assets/photos/profile.jpg" alt="" width="45" height="45"><div><strong>Dr. Sergio Ibarra-Espinosa</strong><p>CISESS · University of Maryland<br>NOAA Air Resources Laboratory</p></div></div>
+        <div class="cover-actions"><button class="primary-button" data-slide="1">Comenzar el viaje ${icon('arrow')}</button><div class="cover-event"><strong>17 noviembre 2026</strong>Campus Ñuñoa · Santiago</div></div>`;
+    } else {
+      if (slide.details?.length) content += `<ul class="slide-details">${slide.details.map(detail => `<li><span class="detail-label">${escape(detail.label)}</span><span class="detail-text">${escape(detail.text)}</span></li>`).join('')}</ul>`;
+      if (slide.takeaway) content += `<p class="takeaway">${escape(slide.takeaway)}</p>`;
+      if (slide.link) content += `<a class="story-link" href="${escape(slide.link.href)}" target="_blank" rel="noopener">${escape(slide.link.label)} ${icon('diagonal')}</a>`;
+      if (slide.type === 'personal') content += `<div class="ending-actions"><button class="primary-button" data-dialog="resourcesDialog">Recursos y contacto ${icon('diagonal')}</button><button class="text-button" data-slide="0">Volver al inicio ${icon('arrow')}</button></div>`;
+      const logoIds = slide.logos || (slide.id === 'magister' ? ['uchile'] : ({ brasil: ['usp'], boulder: ['colorado', 'noaa'], maryland: ['umd', 'noaa'], china: ['cas'] })[slide.institutionStage] || []);
+      if (logoIds.length) content += `<div class="institution-logos" aria-label="Instituciones de esta etapa">${logoIds.map(id => institutions[id]).filter(Boolean).map(logo => `<img src="${logo.src}" alt="${logo.name}" class="${logo.className || ''}">`).join('')}</div>`;
+      const pages = chapterSlides(slide.stop);
+      if (currentTrip) {
+        content += `<div class="chapter-pages archive-actions"><button class="text-button" data-return-story>Volver al relato ${icon('arrow')}</button><button class="text-button" data-dialog="routeDialog" data-route-view="archive">Ver todos los viajes</button></div>`;
+      } else if (pages.length > 1) {
+        content += `<nav class="chapter-pages" aria-label="Diapositivas de esta etapa">${pages.map(item => `<button class="chapter-page" data-slide="${item.index}" aria-label="${escape(plain(item.slide.title))}" aria-current="${item.index === currentIndex}"></button>`).join('')}<span class="chapter-page-label">${pages.findIndex(item => item.index === currentIndex) + 1} / ${pages.length}</span></nav>`;
       }
-    });
-
-    // Update Map Bottom Overlay Card
-    const tagEl = document.getElementById("mapStopTag");
-    const nameEl = document.getElementById("mapStopName");
-    const coordsEl = document.getElementById("mapStopCoords");
-    if (tagEl) tagEl.textContent = `PARADA ${nextStop.number} DE ${stops.length} · ${nextStop.period}`;
-    if (nameEl) nameEl.textContent = `${nextStop.city}`;
-    if (coordsEl) {
-      coordsEl.textContent = `${nextStop.code} · Lat ${nextStop.coords[0].toFixed(2)}°, Lon ${nextStop.coords[1].toFixed(2)}° · Modelos: ${nextStop.models.join(", ")}`;
     }
+    $('story').innerHTML = `<div class="story-inner story-enter">${content}</div>`;
+    $('story').scrollTop = 0;
+  }
 
-    if (!prevStop || prevStop.id === nextStop.id) {
-      map.flyTo(nextStop.coords, nextStop.zoom, { duration: 1.4 });
-      planeMarker.setLatLng(nextStop.coords);
+  function renderMedia(slide) {
+    const images = slide.images || [];
+    const image = images[currentImage];
+    $('visual').dataset.media = slide.visual === 'family' ? 'family' : image ? 'photo' : slide.visual || 'globe';
+    $('visual').classList.toggle('has-atlas-title', !image && slide.visual === 'globe');
+    $('globeToggle').hidden = !globe || Boolean(slide.hideGlobe) || (!image && !['notebook', 'closing'].includes(slide.visual));
+    if (slide.visual === 'family') {
+      $('mediaLayer').innerHTML = `<div class="family-album"><span class="eyebrow">ARCHIVO FAMILIAR</span><div class="family-photos">${images.map((item, i) => `<figure class="family-photo family-photo-${i}"><button data-open-image="${i}" aria-label="Ampliar: ${escape(item.alt)}"><img src="${escape(item.src)}" alt="${escape(item.alt)}"></button><figcaption>${escape(item.caption)}</figcaption></figure>`).join('')}</div><p class="family-dedication">En memoria de mis papás.</p></div>`;
+      $('visualCaption').textContent = 'Los recuerdos que acompañan este camino · Archivo familiar';
       return;
     }
-
-    if (animFrameId) cancelAnimationFrame(animFrameId);
-    if (activeArcLine) map.removeLayer(activeArcLine);
-
-    const arcPts = getCurvedArc(prevStop.coords, nextStop.coords, 90);
-    activeArcLine = L.polyline([], {
-      color: "#f59e0b",
-      weight: 3.5,
-      opacity: 0.95
-    }).addTo(map);
-
-    // Fit bounds or fly smoothly
-    const dist = Math.hypot(
-      nextStop.coords[0] - prevStop.coords[0],
-      nextStop.coords[1] - prevStop.coords[1]
-    );
-    const flightDurationMs = dist > 20 ? 2200 : 1100;
-
-    map.flyTo(nextStop.coords, nextStop.zoom, {
-      duration: flightDurationMs / 1000,
-      easeLinearity: 0.25
-    });
-
-    const startTime = performance.now();
-    function step(now) {
-      const elapsed = now - startTime;
-      const progress = Math.min(elapsed / flightDurationMs, 1);
-      const idx = Math.floor(progress * (arcPts.length - 1));
-      const pt = arcPts[idx];
-      planeMarker.setLatLng(pt);
-      activeArcLine.setLatLngs(arcPts.slice(0, idx + 1));
-
-      if (progress < 1) {
-        animFrameId = requestAnimationFrame(step);
-      }
-    }
-    animFrameId = requestAnimationFrame(step);
-  }
-
-  // Show global overview of all stops on the map
-  window.showWorldOverview = function () {
-    if (!map) return;
-    const group = L.featureGroup(Object.values(stopMarkers));
-    map.flyToBounds(group.getBounds().pad(0.18), { duration: 1.5 });
-  };
-
-  // Render Top Route Ribbon
-  function renderRouteRibbon() {
-    const ribbon = document.getElementById("routeRibbon");
-    if (!ribbon) return;
-    const activeStopIdx = getStopIndex(slides[currentSlideIdx].stopId);
-
-    ribbon.innerHTML = stops
-      .map((stop, idx) => {
-        const isCurrent = stop.id === slides[currentSlideIdx].stopId;
-        const isVisited = idx < activeStopIdx;
-        const cls = isCurrent ? "stop-pill active" : isVisited ? "stop-pill visited" : "stop-pill";
-        const connCls = idx < activeStopIdx ? "route-connector active" : "route-connector";
-        const connector = idx < stops.length - 1 ? `<div class="${connCls}"></div>` : "";
-        return `
-          <button class="${cls}" data-stop-id="${stop.id}" title="${stop.city} (${stop.period})">
-            <span class="stop-num">${stop.number}</span>
-            <span>${stop.shortName.replace(/^\d+\.\s*/, "")}</span>
-          </button>
-          ${connector}
-        `;
-      })
-      .join("");
-
-    ribbon.querySelectorAll(".stop-pill").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const sid = btn.getAttribute("data-stop-id");
-        const stopSlides = getSlidesForStop(sid);
-        if (stopSlides.length > 0) {
-          goToSlide(stopSlides[0].index);
-        }
-      });
-    });
-
-    // Ensure active pill is scrolled into view
-    const activePill = ribbon.querySelector(".stop-pill.active");
-    if (activePill) {
-      activePill.scrollIntoView({ behavior: "smooth", inline: "center", block: "nearest" });
+    if (image) {
+      const science = image.fit === 'contain' && !['photo', 'logo'].includes(image.kind);
+      const kind = image.kind === 'logo' ? ' is-logo' : science ? ' is-figure' : image.treatment === 'archive' ? ' is-archive' : image.fit === 'contain' ? ' is-full-photo' : '';
+      const label = image.kind === 'logo' ? 'SOFTWARE ABIERTO' : science ? 'DESDE LA INVESTIGACIÓN' : image.treatment === 'archive' ? 'ARCHIVO PERSONAL / UTEM' : '';
+      $('mediaLayer').innerHTML = `
+        <figure class="photo-frame${kind}">
+          <button class="photo-button" id="photoButton" aria-label="Ampliar imagen: ${escape(image.alt)}"><img id="slideImage" src="${escape(image.src)}" alt="${escape(image.alt)}" style="object-position:${escape(image.position || '50% 50%')}" decoding="async"></button>
+          ${label ? `<span class="photo-label">${label}</span>` : ''}
+          <span class="zoom-cue">${icon('expand')}</span>
+        </figure>
+        ${images.length > 1 ? `<div class="gallery-controls" role="group" aria-label="Imágenes de esta diapositiva">${images.map((item, i) => `<button class="gallery-button" data-image="${i}" aria-label="Ver imagen ${i + 1}: ${escape(item.caption)}" aria-pressed="${i === currentImage}">${number(i + 1)}</button>`).join('')}</div>` : ''}`;
+      $('visualCaption').innerHTML = imageCaption(image);
+      const img = $('slideImage');
+      img.addEventListener('error', () => {
+        if (!img.isConnected) return;
+        img.closest('figure').innerHTML = `<div class="image-fallback" role="status">${icon('photo')}<h3>La imagen no pudo cargar.</h3><p>${escape(image.caption)}</p><button class="text-button" data-retry-image>Intentar de nuevo ${icon('arrow')}</button></div>`;
+      }, { once: true });
+      $('photoButton').addEventListener('click', () => openImage(image));
+    } else if (slide.visual === 'notebook') {
+      const book = slide.notebook;
+      $('mediaLayer').innerHTML = `<div class="notebook"><span class="notebook-number" aria-hidden="true">${escape(book.number)}</span><div class="notebook-content"><span class="eyebrow">NOTAS DEL CAMINO</span><h3>${escape(book.title)}</h3><ul>${book.items.map(item => `<li>${escape(item)}</li>`).join('')}</ul></div></div>`;
+      $('visualCaption').textContent = 'Una etapa de la trayectoria · Formación, preguntas y oportunidades.';
+    } else if (slide.visual === 'closing') {
+      $('mediaLayer').innerHTML = `<div class="closing-card"><span class="eyebrow">DE LA UTEM PARA EL MUNDO</span><h3>Sigamos<br><em>en contacto.</em></h3><div class="closing-contact"><a class="qr-link" href="https://ibarraespinosa.github.io/" target="_blank" rel="noopener" aria-label="Visitar el sitio personal de Sergio"><img src="assets/qr.png" alt="Código QR para visitar el sitio y contactar a Sergio Ibarra-Espinosa" width="128" height="128"></a><div><p>Escanea el código.<br>Encontrémonos en la próxima pregunta.</p><a href="mailto:zergioibarra@gmail.com">zergioibarra@gmail.com</a></div></div><button class="primary-button" data-dialog="resourcesDialog">Cursos, código y contacto ${icon('diagonal')}</button></div>`;
+      $('visualCaption').textContent = 'Gracias a la comunidad UTEM y a quienes hicieron posible este encuentro.';
+    } else if (slide.visual === 'globe') {
+      $('mediaLayer').innerHTML = `<div class="atlas-title"><strong>${escape(slide.atlasTitle || locationFor(slide).label)}</strong><span>${escape(slide.atlasSubtitle || '')}</span></div>`;
+      $('visualCaption').textContent = slide.approximate ? 'Ubicación de referencia regional · El punto del mapa es aproximado.' : 'Cada punto del mapa abre una historia. Explora los demás viajes en «El recorrido».';
+    } else {
+      $('mediaLayer').innerHTML = '';
+      $('visualCaption').textContent = 'Un recorrido por los lugares, las preguntas y las personas que hacen una trayectoria.';
     }
   }
 
-  // Render Slide Content
-  function renderCurrentSlide() {
-    const slide = slides[currentSlideIdx];
-    const stop = getStopById(slide.stopId);
-    const stopSlides = getSlidesForStop(slide.stopId);
-    const container = document.getElementById("slideStage");
+  function render(animate = true) {
+    clearTimeout(travelTimer);
+    const slide = activeSlide();
+    const place = locationFor(slide);
+    const cover = slide.type === 'cover';
+    const changedPlace = previousLocation && previousLocation.coordinates.some((value, i) => value !== place.coordinates[i]);
+    const traveling = globe && animate && changedPlace && !cover && !slide.hideGlobe && !reducedMotion;
+    $('stage').classList.toggle('is-cover', cover);
+    $('visual').classList.toggle('is-cover-visual', cover);
+    $('visual').classList.remove('show-globe', 'is-traveling');
+    $('globeToggle').setAttribute('aria-label', 'Ver globo');
+    $('globeToggle').setAttribute('aria-pressed', 'false');
+    $('globeToggle').innerHTML = icon('globe');
+    $('globeNote').hidden = !cover;
+    $('atlasLabel').textContent = slide.atlasLabel || (cover ? 'UN VIAJE QUE EMPEZÓ EN SANTIAGO' : `${place.label} / ${place.country || ''}`.toUpperCase());
+    const [lon, lat] = place.coordinates;
+    $('globeOrigin').innerHTML = `<span class="location-dot"></span><span>${escape(place.label)}<small>${Math.abs(lat).toFixed(2)}° ${lat < 0 ? 'S' : 'N'} / ${Math.abs(lon).toFixed(2)}° ${lon < 0 ? 'O' : 'E'}</small></span>`;
+    renderStory(slide);
+    renderMedia(slide);
+    $('mediaLayer').inert = Boolean(traveling);
+    if (traveling) {
+      $('visual').classList.add('is-traveling');
+      $('travelDestination').textContent = `${previousLocation.label} → ${place.label}`;
+      travelTimer = setTimeout(() => {
+        $('visual').classList.remove('is-traveling');
+        $('mediaLayer').inert = false;
+        syncGlobeVisibility();
+      }, 1500);
+    }
+    if (slide.hideGlobe) globe?.stop();
+    else globe?.setPlace(place, { cover, animate: Boolean(traveling), reduced: reducedMotion });
+    syncGlobeVisibility();
+    previousLocation = place;
 
-    // Update Telemetry Header
-    document.getElementById("telCode").textContent = stop.code;
-    document.getElementById("telPeriod").textContent = stop.period;
-    document.getElementById("telDist").textContent = `${stop.distanceKm.toLocaleString("es-CL")} km`;
+    const index = currentTrip ? trips.indexOf(currentTrip) : currentIndex;
+    const total = currentTrip ? trips.length : slides.length;
+    $('slideNumber').textContent = number(index + 1);
+    $('slideTotal').textContent = number(total);
+    $('slideCounter').setAttribute('aria-label', `${currentTrip ? 'Viaje' : 'Diapositiva'} ${index + 1} de ${total}`);
+    $('previousButton').disabled = index === 0;
+    $('nextButton').disabled = index === total - 1;
+    $('previousButton').setAttribute('aria-label', currentTrip ? 'Viaje anterior' : 'Diapositiva anterior');
+    $('nextButton').setAttribute('aria-label', currentTrip ? 'Viaje siguiente' : 'Diapositiva siguiente');
+    $('progressFill').style.width = `${(index + 1) / total * 100}%`;
+    $('notesHeading').textContent = plain(slide.title);
+    $('notesContent').textContent = slide.notes || 'Cuenta un recuerdo de esta etapa.';
+    $('footerContext').innerHTML = currentTrip ? `ÁLBUM DE VIAJES <span class="detail-divider">/</span><span class="footer-secondary">${escape(place.country)}</span>` : `${cover ? 'SERGIO IBARRA-ESPINOSA' : escape(slide.year || 'MIS RAÍCES') + ' · ' + (slide.hideGlobe ? 'LO QUE VIENE' : escape(place.label).toUpperCase())} <span class="detail-divider">/</span><span class="footer-secondary">${cover ? 'CHARLA · CONVERSATORIO' : 'DE LA UTEM PARA EL MUNDO'}</span>`;
+    $('slideAnnouncement').textContent = `${currentTrip ? 'Viaje' : 'Diapositiva'} ${index + 1} de ${total}. ${plain(slide.title)}${slide.hideGlobe ? '' : ` ${place.label}.`}`;
+    document.title = cover ? 'De la UTEM para el mundo · Sergio Ibarra-Espinosa' : `${plain(slide.title)} · De la UTEM para el mundo`;
+    const activeStop = stops.findIndex(stop => stop.id === slide.stop);
+    document.querySelectorAll('[data-stop]').forEach(button => {
+      const index = stops.findIndex(stop => stop.id === button.dataset.stop);
+      button.classList.toggle('visited', index < activeStop);
+      if (index === activeStop) button.setAttribute('aria-current', 'step');
+      else button.removeAttribute('aria-current');
+    });
+    const activeButton = $('routeTrack').querySelector('[aria-current="step"]');
+    if (activeButton) {
+      const track = $('routeTrack');
+      const left = activeButton.getBoundingClientRect().left - track.getBoundingClientRect().left + track.scrollLeft;
+      track.scrollTo({ left: Math.max(0, left - track.clientWidth / 2 + activeButton.offsetWidth / 2), behavior: reducedMotion ? 'instant' : 'smooth' });
+    }
+    if (matchMedia('(max-width: 760px)').matches) window.scrollTo({ top: 0, behavior: 'instant' });
+    // Decode the next slide's photo in advance; the current story never waits for it.
+    const nextTrip = currentTrip && trips[trips.indexOf(currentTrip) + 1];
+    const nextPhoto = (currentTrip ? nextTrip && tripSlide(nextTrip) : slides[currentIndex + 1])?.images?.[0];
+    if (nextPhoto) { const image = new Image(); image.src = nextPhoto.src; }
+  }
 
-    // Update Bottom Progress & Counter
-    const pct = ((currentSlideIdx + 1) / slides.length) * 100;
-    document.getElementById("progressFill").style.width = `${pct}%`;
-    document.getElementById("slideCounter").textContent = `Slide ${currentSlideIdx + 1} / ${slides.length} · Parada ${stop.number}/10`;
+  function buildNavigation() {
+    $('routeTrack').innerHTML = stops.map(stop => `<button class="route-stop" data-stop="${stop.id}" title="${escape(stop.name)} · ${escape(stop.period)}"><span class="stop-number">${escape(stop.year || '—')}</span><span class="stop-name">${escape(stop.name)}</span></button>`).join('');
+    $('resourceList').innerHTML = window.RESOURCES.map(resource => `<a class="resource-link" href="${escape(resource.href)}" target="_blank" rel="noopener"><span>${escape(resource.tag)}</span><div><h3>${escape(resource.title)}</h3><p>${escape(resource.description)}</p></div>${icon('diagonal')}</a>`).join('');
+    const filters = ['Todos', ...new Set(trips.map(trip => trip.region))];
+    $('tripFilters').innerHTML = filters.map(filter => `<button class="trip-filter" data-filter="${escape(filter)}" aria-pressed="${filter === currentFilter}">${escape(filter)}</button>`).join('');
+    renderRoutes();
+  }
 
-    // Update Prev / Next / Next Stop buttons
-    document.getElementById("prevSlideBtn").disabled = currentSlideIdx === 0;
-    document.getElementById("nextSlideBtn").disabled = currentSlideIdx === slides.length - 1;
+  function renderRoutes() {
+    const query = searchable(routeQuery.trim());
+    const matches = value => searchable(value).includes(query);
+    const matchingStops = stops.filter(stop => matches([stop.name, stop.country, stop.period, ...slides.filter(slide => slide.stop === stop.id).flatMap(slide => [slide.title, slide.text, slide.year, slide.period])].join(' ')));
+    const matchingTrips = trips.filter(trip => (currentFilter === 'Todos' || trip.region === currentFilter) && matches([trip.city, trip.country, trip.period, trip.event, ...(trip.topics || [])].join(' ')));
+    $('routeGrid').innerHTML = matchingStops.map(stop => `<button class="route-card" data-stop="${stop.id}"${activeSlide().stop === stop.id ? ' aria-current="step"' : ''}><span class="route-card-number">${number(stops.indexOf(stop) + 1)}</span><span><span class="route-card-title">${escape(stop.name)}</span><small>${escape(stop.period)}</small><span class="route-card-description">${escape(stop.description)}</span></span>${icon('diagonal')}</button>`).join('');
+    $('tripList').innerHTML = matchingTrips.map(trip => `<button class="trip-row" data-trip="${trip.id}"${currentTrip?.id === trip.id ? ' aria-current="true"' : ''}><span>${escape(trip.period)}</span><span><strong>${escape(trip.city)} <small>${escape(trip.country)}</small></strong><small>${escape(trip.event)}</small></span>${icon('diagonal')}</button>`).join('');
+    $('tripFilters').querySelectorAll('[data-filter]').forEach(button => button.setAttribute('aria-pressed', button.dataset.filter === currentFilter));
+    const count = routeView === 'story' ? matchingStops.length : matchingTrips.length;
+    const total = routeView === 'story' ? stops.length : trips.length;
+    $('routeResults').textContent = `${count} de ${total} ${routeView === 'story' ? 'etapas' : 'destinos'}${routeQuery.trim() ? ` · «${routeQuery.trim()}»` : ''}`;
+    $('routeEmpty').hidden = count > 0;
+  }
 
-    // Speaker notes
-    document.getElementById("notesBody").innerHTML = slide.speakerNotes || "Sin notas para esta diapositiva.";
+  function setRouteView(view) {
+    if (!['story', 'archive'].includes(view)) return;
+    routeView = view;
+    $('routeStoryPanel').hidden = view !== 'story';
+    $('routeArchivePanel').hidden = view !== 'archive';
+    document.querySelectorAll('.route-view').forEach(button => button.setAttribute('aria-pressed', button.dataset.routeView === view));
+    renderRoutes();
+  }
 
-    // Sub-slide dots within current stop
-    const subDotsHtml = stopSlides
-      .map((item, i) => {
-        const active = item.index === currentSlideIdx ? "sub-dot active" : "sub-dot";
-        return `<button class="${active}" data-slide-idx="${item.index}">${i + 1}. ${item.slide.subTitlePill}</button>`;
-      })
-      .join("");
+  function closeDialogs() { document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close()); }
 
-    const badgeLabel =
-      slide.badgeType === "science"
-        ? "🔬 Ciencia & Modelos"
-        : slide.badgeType === "interactive"
-        ? "🎛️ Laboratorio Interactivo"
-        : "✈️ Trayectoria & Vida";
+  function openDialog(id, { view } = {}) {
+    closeDialogs();
+    const dialog = $(id);
+    if (!dialog) return;
+    if (id === 'routeDialog') setRouteView(view || routeView);
+    dialog.showModal();
+    dialog.scrollTop = 0;
+    document.body.classList.add('dialog-open');
+    globe?.stop();
+  }
 
-    // Special Render Type 1: Boarding Pass (Slide 0)
-    if (slide.renderType === "boarding_pass") {
-      container.innerHTML = `
-        <div class="slide-inner">
-          <div class="slide-top-meta">
-            <div class="badge-row">
-              <span class="pill-badge stop">📍 ${stop.city}</span>
-              <span class="pill-badge ${slide.badgeType}">${badgeLabel}</span>
-            </div>
-            <div class="slide-sub-dots">${subDotsHtml}</div>
-          </div>
+  function openImage(image) {
+    lightboxImages = activeSlide().images || [image];
+    lightboxIndex = Math.max(0, lightboxImages.indexOf(image));
+    renderLightbox();
+    openDialog('lightbox');
+  }
 
-          <h1 class="slide-headline">${slide.headline}</h1>
-          <p class="slide-subtitle">${slide.subtitle}</p>
+  function renderLightbox() {
+    const image = lightboxImages[lightboxIndex];
+    if (!image) return;
+    $('lightboxImage').hidden = false;
+    $('lightboxImage').src = image.src;
+    $('lightboxImage').alt = image.alt;
+    $('lightboxCaption').innerHTML = imageCaption(image);
+    $('lightboxControls').hidden = lightboxImages.length < 2;
+    $('lightboxCounter').textContent = `${lightboxIndex + 1} / ${lightboxImages.length}`;
+    $('lightboxPrevious').disabled = lightboxIndex === 0;
+    $('lightboxNext').disabled = lightboxIndex === lightboxImages.length - 1;
+  }
 
-          <div class="boarding-pass">
-            <div class="bp-header">
-              <div class="bp-route">
-                <div>
-                  <div class="bp-code">UTEM · SCL</div>
-                  <div class="bp-city">Campus Ñuñoa, Santiago</div>
-                </div>
-                <div class="bp-plane-divider">┈┈┈ ✈️ ┈┈┈</div>
-                <div>
-                  <div class="bp-code">MUNDO</div>
-                  <div class="bp-city">CHILE · BRASIL · CHINA · FRANCIA · UK · EE.UU.</div>
-                </div>
-              </div>
-              <button class="cta-takeoff-btn" id="startFlightBtn">
-                ✈️ Despegar en el Viaje Científico
-              </button>
-            </div>
+  function stepImage(direction) {
+    const next = lightboxIndex + direction;
+    if (next < 0 || next >= lightboxImages.length) return;
+    lightboxIndex = next;
+    renderLightbox();
+  }
 
-            <div class="bp-grid">
-              <div>
-                <div class="bp-field-label">Pasajero / Expositor</div>
-                <div class="bp-field-val">Dr. Sergio Ibarra-Espinosa</div>
-              </div>
-              <div>
-                <div class="bp-field-label">Profesión de Origen (UTEM)</div>
-                <div class="bp-field-val">Ing. en Prevención de Riesgos y Medio Ambiente</div>
-              </div>
-              <div>
-                <div class="bp-field-label">Posición Actual (EE.UU.)</div>
-                <div class="bp-field-val">Visiting Research Scientist · CISESS UMD & NOAA ARL</div>
-              </div>
-              <div>
-                <div class="bp-field-label">Impacto Científico Global</div>
-                <div class="bp-field-val">48+ Papers · 1,665+ Citas (H=26) · >100k Descargas</div>
-              </div>
-            </div>
-          </div>
+  function toggleNotes() {
+    const opening = $('notesPanel').hidden;
+    if (opening) notesReturnFocus = document.activeElement;
+    const hadFocus = $('notesPanel').contains(document.activeElement);
+    $('notesPanel').hidden = !opening;
+    $('notesButton').setAttribute('aria-expanded', opening);
+    if (opening) $('closeNotes').focus({ preventScroll: true });
+    else if (hadFocus) (notesReturnFocus?.isConnected ? notesReturnFocus : $('notesButton')).focus({ preventScroll: true });
+  }
 
-          <div class="grid-2">
-            <div class="glass-card">
-              <div class="card-title">📬 Invitación Oficial a nuestra Comunidad UTEM</div>
-              <p style="font-size:0.9rem;line-height:1.58;color:#cbd5e1;font-style:italic;">
-                «La Dirección del Departamento de Física y el Decanato de la Facultad de Ciencias Naturales, Matemática y del Medioambiente les saluda y extiende una invitación para el <strong>martes 17 de noviembre a las 10:00 horas en la multisala de la biblioteca Ximena Sánchez S., Campus Ñuñoa</strong>.<br/><br/>
-                Invitado: <strong>Dr. Sergio Ibarra E.</strong>, Ingeniero en Prevención de Riesgos y Medio Ambiente (UTEM), Investigador científico visitante en el Cooperative Institute for Satellite Earth System Studies (CISESS), Universidad de Maryland, NOAA Air Resources Laboratory, EE. UU.»
-              </p>
-            </div>
-            <div class="glass-card">
-              <div class="card-title">🗺️ Hoja de Ruta del Vuelo (Haz clic en cualquier parada arriba o en el mapa)</div>
-              <ul class="science-list">
-                <li><strong>1–3. Chile (2003–2013):</strong> Pregrado en <strong>UTEM</strong>, 6 años en <strong>CENMA</strong> y Magíster en la <strong>U. de Chile</strong>.</li>
-                <li><strong>4. Brasil (2013–2022):</strong> Doctorado y Postdoc en <strong>USP & IPEN</strong> (creación de <code>VEIN</code>, <code>eixport</code>, <code>WRF-Chem</code>).</li>
-                <li><strong>5–7. Asia y Europa (2016–2021):</strong> <strong>Academia China de Ciencias (CAS)</strong>, <strong>Francia (CEREA / MUNICH)</strong> y <strong>Reino Unido (TRL & Univ. Leeds)</strong>.</li>
-                <li><strong>8–9. Estados Unidos (2022–Hoy):</strong> <strong>NOAA GML & CU Boulder</strong> (Metano) y <strong>NOAA ARL & Univ. of Maryland</strong> (Estratósfera, HYSPLIT y ML).</li>
-              </ul>
-            </div>
-          </div>
-        </div>
-      `;
-      bindSubDots(container);
-      const startBtn = document.getElementById("startFlightBtn");
-      if (startBtn) startBtn.addEventListener("click", () => goToSlide(1));
+  function syncGlobeVisibility() {
+    const slide = activeSlide();
+    const hasMedia = slide.images?.length || ['family', 'notebook', 'closing'].includes(slide.visual);
+    const showing = $('visual').classList.contains('show-globe');
+    const traveling = $('visual').classList.contains('is-traveling');
+    const visible = !slide.hideGlobe && (!hasMedia || showing || traveling);
+    $('globeWrap').setAttribute('aria-hidden', !visible);
+    $('globeWrap').inert = !visible;
+    $('mediaLayer').inert = showing || traveling;
+    $('globeCanvas').setAttribute('aria-label', `Globo con la ruta de Sergio, centrado en ${locationFor(slide).label}. Arrastra para girarlo o abre «El recorrido» para elegir una parada.`);
+  }
+
+  function toggleGlobe() {
+    if ($('globeToggle').hidden) return;
+    clearTimeout(travelTimer);
+    $('visual').classList.remove('is-traveling');
+    const showing = $('visual').classList.toggle('show-globe');
+    $('globeToggle').setAttribute('aria-label', showing ? 'Ver imagen' : 'Ver globo');
+    $('globeToggle').setAttribute('aria-pressed', showing);
+    $('globeToggle').innerHTML = icon(showing ? 'photo' : 'globe');
+    syncGlobeVisibility();
+    globe?.draw();
+  }
+
+  function applyMotionPreference(enabled) {
+    reducedMotion = enabled;
+    document.body.classList.toggle('reduce-motion', reducedMotion);
+    $('motionToggle').checked = reducedMotion;
+    clearTimeout(travelTimer);
+    $('visual').classList.remove('is-traveling');
+    syncGlobeVisibility();
+    if (!activeSlide().hideGlobe) globe?.setPlace(locationFor(activeSlide()), { cover: activeSlide().type === 'cover', animate: false, reduced: reducedMotion });
+    if (document.querySelector('dialog[open]')) globe?.stop();
+  }
+
+  function notify(message) {
+    clearTimeout(toastTimer);
+    $('toast').textContent = message;
+    $('toast').hidden = false;
+    toastTimer = setTimeout(() => { $('toast').hidden = true; }, 4200);
+  }
+
+  async function fullscreen() {
+    try {
+      if (document.fullscreenElement) await document.exitFullscreen();
+      else if (document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen();
+      else notify('Usa la opción de pantalla completa de tu navegador.');
+    } catch { notify('Puedes activar la pantalla completa desde el menú del navegador.'); }
+  }
+
+  function readHash({ initial = false } = {}) {
+    let hash;
+    try { hash = decodeURIComponent(location.hash.slice(1)); } catch { hash = 'inicio'; }
+    if (hash === 'story' && !initial) { $('story').focus(); return; }
+    // Main slide IDs take precedence over legacy viaje-* archive links.
+    const index = slides.findIndex(slide => slide.id === hash);
+    if (index >= 0) {
+      if (index === currentIndex && !currentTrip && !initial) return;
+      goToSlide(index, { updateHash: false, animate: !initial });
       return;
     }
-
-    // Special Render Type 2: Full Interactive VEIN Simulator
-    if (slide.renderType === "vein_simulator") {
-      container.innerHTML = `
-        <div class="slide-inner">
-          <div class="slide-top-meta">
-            <div class="badge-row">
-              <span class="pill-badge stop">📍 ${stop.city}</span>
-              <span class="pill-badge interactive">${badgeLabel}</span>
-            </div>
-            <div class="slide-sub-dots">${subDotsHtml}</div>
-          </div>
-          <h1 class="slide-headline">${slide.headline}</h1>
-          <p class="slide-subtitle">${slide.subtitle}</p>
-
-          <div class="sim-panel">
-            <div class="sim-controls-grid">
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>🚗 Velocidad Media Vial</span>
-                  <span class="sim-control-val" id="veinSpeedVal">28 km/h</span>
-                </div>
-                <input type="range" id="veinSpeed" min="8" max="100" value="28" />
-              </div>
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>🌡️ Temperatura Ambiente</span>
-                  <span class="sim-control-val" id="veinTempVal">26 °C</span>
-                </div>
-                <input type="range" id="veinTemp" min="5" max="40" value="26" />
-              </div>
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>🌱 % Etanol / Biocombustible</span>
-                  <span class="sim-control-val" id="veinEthVal">45 %</span>
-                </div>
-                <input type="range" id="veinEth" min="0" max="90" value="45" />
-              </div>
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>🔧 Edad Media de Flota</span>
-                  <span class="sim-control-val" id="veinAgeVal">11 años</span>
-                </div>
-                <input type="range" id="veinAge" min="1" max="28" value="11" />
-              </div>
-            </div>
-
-            <div class="grid-4" id="veinLiveKpis" style="margin-bottom:14px;"></div>
-
-            <div class="sim-canvas-wrap">
-              <canvas id="veinSimCanvas" class="sim-canvas" width="960" height="250"></canvas>
-            </div>
-            <p style="font-size:0.78rem;color:#94a3b8;margin-top:8px;">
-              💡 <strong>Física y Química en VEIN:</strong> Observa cómo bajo <strong>20 km/h</strong> (congestión) las emisiones de escape de CO y NOx se disparan no-linealmente, mientras que sobre <strong>28 °C</strong> las emisiones <strong>evaporativas de COV (Hot-Soak + Diurnal + Running Losses)</strong> crecen exponencialmente (hallazgo clave de nuestro artículo en <em>Environmental Science & Technology</em>, 2026).
-            </p>
-          </div>
-        </div>
-      `;
-      bindSubDots(container);
-      initVeinSimulator();
+    const archiveId = hash.match(/^(?:archivo-|viaje-)(.+)$/)?.[1];
+    if (archiveId && trips.some(trip => trip.id === archiveId)) {
+      if (currentTrip?.id !== archiveId || initial) showTrip(archiveId, { updateHash: false, animate: !initial });
       return;
     }
+    goToSlide(0, { updateHash: false, animate: !initial });
+    if (hash === 'story') $('story').focus();
+  }
 
-    // Special Render Type 3: Stratospheric Aerosol Injection & Inversion Simulator
-    if (slide.renderType === "strato_simulator") {
-      container.innerHTML = `
-        <div class="slide-inner">
-          <div class="slide-top-meta">
-            <div class="badge-row">
-              <span class="pill-badge stop">📍 ${stop.city}</span>
-              <span class="pill-badge interactive">${badgeLabel}</span>
-            </div>
-            <div class="slide-sub-dots">${subDotsHtml}</div>
-          </div>
-          <h1 class="slide-headline">${slide.headline}</h1>
-          <p class="slide-subtitle">${slide.subtitle}</p>
-
-          <div class="sim-panel">
-            <div class="sim-controls-grid">
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>🌋 Masa Inyectada (SAI / Volcán)</span>
-                  <span class="sim-control-val" id="saiMassVal">100 t SO₂</span>
-                </div>
-                <input type="range" id="saiMass" min="10" max="1000" step="10" value="100" />
-              </div>
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>🎈 Altitud de Inyección</span>
-                  <span class="sim-control-val" id="saiAltVal">21 km</span>
-                </div>
-                <input type="range" id="saiAlt" min="15" max="28" step="1" value="21" />
-              </div>
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>📡 Estaciones Globales B2SAP</span>
-                  <span class="sim-control-val" id="saiStnVal">6 sitios</span>
-                </div>
-                <input type="range" id="saiStn" min="1" max="12" step="1" value="6" />
-              </div>
-              <div class="sim-control">
-                <div class="sim-control-header">
-                  <span>⚡ Partículas HYSPLIT (NUMPAR)</span>
-                  <span class="sim-control-val" id="saiPartVal">20,000 / nivel</span>
-                </div>
-                <input type="range" id="saiPart" min="2500" max="50000" step="2500" value="20000" />
-              </div>
-            </div>
-
-            <div class="grid-4" id="saiLiveKpis" style="margin-bottom:14px;"></div>
-
-            <div class="sim-canvas-wrap">
-              <canvas id="saiSimCanvas" class="sim-canvas" width="960" height="250"></canvas>
-            </div>
-            <p style="font-size:0.78rem;color:#94a3b8;margin-top:8px;">
-              💡 <strong>Vigilancia Estratosférica (NOAA ARL / DoD ESTCP):</strong> Con un límite de detección instrumental $\\text{DL} = 10^{-7}\\text{ g/m}^3$, la probabilidad de detección ($POD$) depende del acoplamiento entre la matriz de transferencia Lagrangiana ($\\mathbf{M}_{x,y,z,t,s}$) y la densidad de sondeos de la red B2SAP.
-            </p>
-          </div>
-        </div>
-      `;
-      bindSubDots(container);
-      initStratoSimulator();
-      return;
+  document.addEventListener('click', event => {
+    const target = event.target.closest('button, a');
+    if (!target) return;
+    if (target.classList.contains('skip-link')) { event.preventDefault(); $('story').focus(); }
+    else if (target.dataset.slide !== undefined) goToSlide(Number(target.dataset.slide));
+    else if (target.dataset.stop) goToSlide(indexForStop(target.dataset.stop));
+    else if (target.dataset.trip) showTrip(target.dataset.trip);
+    else if (target.dataset.dialog) openDialog(target.dataset.dialog, { view: target.dataset.routeView });
+    else if (target.dataset.routeView) setRouteView(target.dataset.routeView);
+    else if (target.hasAttribute('data-close')) target.closest('dialog')?.close();
+    else if (target.hasAttribute('data-return-story')) goToSlide(currentIndex);
+    else if (target.hasAttribute('data-retry-image')) { renderMedia(activeSlide()); $('photoButton')?.focus({ preventScroll: true }); }
+    else if (target.hasAttribute('data-reset-route')) {
+      routeQuery = '';
+      currentFilter = 'Todos';
+      $('routeSearch').value = '';
+      renderRoutes();
+      $('routeSearch').focus({ preventScroll: true });
     }
-
-    // Standard Slide Layout (Stats + Left Card + Right Card / Figure / Mini-Simulator)
-    const statsHtml = slide.stats
-      ? `<div class="grid-${slide.stats.length}">${slide.stats
-          .map(
-            (st) => `
-          <div class="stat-card">
-            <div class="stat-value ${st.color || ""}">${st.value}</div>
-            <div class="stat-label">${st.label}</div>
-          </div>`
-          )
-          .join("")}</div>`
-      : "";
-
-    const leftCardHtml = renderCardObject(slide.leftCard);
-    let rightColumnHtml = "";
-
-    if (slide.rightCard) {
-      rightColumnHtml = renderCardObject(slide.rightCard);
-    } else if (slide.rightFigure) {
-      rightColumnHtml = renderFigureGallery(slide.rightFigure);
-    } else if (slide.rightSim === "epi_sim") {
-      rightColumnHtml = `
-        <div class="glass-card">
-          <div class="card-title">🎛️ Simulador Epidemiológico: MP2.5 e IRA / ACV en Santiago</div>
-          <div class="sim-control" style="margin-bottom:10px;">
-            <div class="sim-control-header">
-              <span>Concentración Episodio MP2.5 (Pudahuel / RM)</span>
-              <span class="sim-control-val" id="epiPmVal">85 μg/m³</span>
-            </div>
-            <input type="range" id="epiPm" min="15" max="180" value="85" />
-          </div>
-          <div class="sim-control" style="margin-bottom:12px;">
-            <div class="sim-control-header">
-              <span>Temperatura / Ozono Estival</span>
-              <span class="sim-control-val" id="epiTempVal">29 °C</span>
-            </div>
-            <input type="range" id="epiTemp" min="8" max="37" value="29" />
-          </div>
-          <div class="sim-canvas-wrap">
-            <canvas id="epiSimCanvas" class="sim-canvas" width="480" height="210"></canvas>
-          </div>
-          <p class="figure-caption" id="epiSimSummary"></p>
-        </div>
-      `;
-    } else if (slide.rightSim === "canyon_sim") {
-      rightColumnHtml = `
-        <div class="glass-card">
-          <div class="card-title">🎛️ Simulador Cañón Urbano (VEIN + MUNICH)</div>
-          <div class="sim-control" style="margin-bottom:10px;">
-            <div class="sim-control-header">
-              <span>Geometría del Cañón: Razón Altura/Ancho (H/W)</span>
-              <span class="sim-control-val" id="canyonHwVal">1.8 (Cañón Profundo)</span>
-            </div>
-            <input type="range" id="canyonHw" min="0.4" max="3.0" step="0.1" value="1.8" />
-          </div>
-          <div class="sim-control" style="margin-bottom:12px;">
-            <div class="sim-control-header">
-              <span>Velocidad del Viento sobre los Techos (u_0)</span>
-              <span class="sim-control-val" id="canyonWindVal">2.2 m/s</span>
-            </div>
-            <input type="range" id="canyonWind" min="0.5" max="8.0" step="0.1" value="2.2" />
-          </div>
-          <div class="sim-canvas-wrap">
-            <canvas id="canyonSimCanvas" class="sim-canvas" width="480" height="210"></canvas>
-          </div>
-          <p class="figure-caption" id="canyonSimSummary"></p>
-        </div>
-      `;
+    else if (target.dataset.image !== undefined) {
+      currentImage = Number(target.dataset.image);
+      renderMedia(activeSlide());
+      $('mediaLayer').querySelector(`[data-image="${currentImage}"]`)?.focus({ preventScroll: true });
+    } else if (target.dataset.openImage !== undefined) {
+      const image = activeSlide().images?.[Number(target.dataset.openImage)];
+      if (image) openImage(image);
+    } else if (target.dataset.filter) {
+      currentFilter = target.dataset.filter;
+      renderRoutes();
     }
+  });
 
-    container.innerHTML = `
-      <div class="slide-inner">
-        <div class="slide-top-meta">
-          <div class="badge-row">
-            <span class="pill-badge stop">📍 ${stop.city} (${stop.period})</span>
-            <span class="pill-badge ${slide.badgeType}">${badgeLabel}</span>
-          </div>
-          <div class="slide-sub-dots">${subDotsHtml}</div>
-        </div>
+  $('previousButton').addEventListener('click', () => step(-1));
+  $('nextButton').addEventListener('click', () => step(1));
+  $('presentButton').addEventListener('click', fullscreen);
+  $('notesButton').addEventListener('click', toggleNotes);
+  $('closeNotes').addEventListener('click', toggleNotes);
+  $('globeToggle').addEventListener('click', toggleGlobe);
+  $('routeSearch').addEventListener('input', event => { routeQuery = event.target.value; renderRoutes(); });
+  $('lightboxPrevious').addEventListener('click', () => stepImage(-1));
+  $('lightboxNext').addEventListener('click', () => stepImage(1));
+  $('lightboxImage').addEventListener('error', () => {
+    $('lightboxImage').hidden = true;
+    $('lightboxCaption').textContent = 'No se pudo cargar esta imagen. Puedes cerrar el visor y volver a intentarlo.';
+  });
+  $('motionToggle').addEventListener('change', event => {
+    savedMotion = event.target.checked;
+    try { localStorage.setItem('utem-reduced-motion', String(savedMotion)); } catch { /* Optional preference. */ }
+    applyMotionPreference(savedMotion);
+  });
+  motionPreference.addEventListener('change', event => { if (savedMotion === null) applyMotionPreference(event.matches); });
+  document.addEventListener('fullscreenchange', () => {
+    const enabled = Boolean(document.fullscreenElement);
+    $('presentButton').querySelector('span').textContent = enabled ? 'Salir' : 'Presentar';
+    $('presentButton').setAttribute('title', enabled ? 'Salir de pantalla completa (F)' : 'Pantalla completa (F)');
+    $('presentButton').setAttribute('aria-label', enabled ? 'Salir de pantalla completa' : 'Presentar en pantalla completa');
+  });
 
-        <h1 class="slide-headline">${slide.headline}</h1>
-        <p class="slide-subtitle">${slide.subtitle}</p>
-
-        ${statsHtml}
-
-        <div class="grid-2">
-          ${leftCardHtml}
-          ${rightColumnHtml}
-        </div>
-      </div>
-    `;
-
-    bindSubDots(container);
-    bindFigureGallery(container);
-
-    if (slide.rightSim === "epi_sim") initEpiSimulator();
-    if (slide.rightSim === "canyon_sim") initCanyonSimulator();
-  }
-
-  function renderCardObject(card) {
-    if (!card) return "";
-    const formulaHtml = card.formula
-      ? `<div class="formula-box">${formatFormulaBlock(card.formula)}</div>`
-      : "";
-    const bulletsHtml = card.bullets
-      ? `<ul class="science-list">${card.bullets
-          .map((b) => `<li>${formatMathText(b)}</li>`)
-          .join("")}</ul>`
-      : "";
-    const paperHtml = card.paper
-      ? `<div class="paper-box">
-          <span class="paper-tag">📄 ${card.paper.tag}</span>
-          ${formatMathText(card.paper.text)}
-        </div>`
-      : "";
-
-    return `
-      <div class="glass-card">
-        <div class="card-title">${card.title}</div>
-        ${formulaHtml}
-        ${bulletsHtml}
-        ${paperHtml}
-      </div>
-    `;
-  }
-
-  function renderFigureGallery(figObj) {
-    const imgs = figObj.images || [];
-    if (imgs.length === 0) return "";
-    const tabsHtml =
-      imgs.length > 1
-        ? `<div class="figure-tabs">
-            ${imgs
-              .map(
-                (img, idx) =>
-                  `<button class="fig-tab-btn ${idx === 0 ? "active" : ""}" data-fig-idx="${idx}">${img.label}</button>`
-              )
-              .join("")}
-          </div>`
-        : `<div class="card-title">📊 ${imgs[0].label}</div>`;
-
-    return `
-      <div class="glass-card">
-        ${tabsHtml}
-        <div class="figure-frame">
-          <img id="activeSlideImg" src="${imgs[0].src}" alt="${imgs[0].label}" />
-          <div class="figure-caption" id="activeSlideCaption">
-            🔍 <em>Haz clic en la figura para ampliar a pantalla completa:</em> ${imgs[0].caption}
-          </div>
-        </div>
-      </div>
-    `;
-  }
-
-  function bindSubDots(container) {
-    container.querySelectorAll(".sub-dot").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        const idx = parseInt(btn.getAttribute("data-slide-idx"), 10);
-        goToSlide(idx);
-      });
+  document.querySelectorAll('dialog').forEach(dialog => {
+    dialog.addEventListener('close', () => {
+      const open = Boolean(document.querySelector('dialog[open]'));
+      document.body.classList.toggle('dialog-open', open);
+      if (!open && !activeSlide().hideGlobe) globe?.start();
     });
-  }
-
-  function bindFigureGallery(container) {
-    const slide = slides[currentSlideIdx];
-    if (!slide.rightFigure || !slide.rightFigure.images) return;
-    const imgs = slide.rightFigure.images;
-    const imgEl = document.getElementById("activeSlideImg");
-    const capEl = document.getElementById("activeSlideCaption");
-
-    container.querySelectorAll(".fig-tab-btn").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        container.querySelectorAll(".fig-tab-btn").forEach((b) => b.classList.remove("active"));
-        btn.classList.add("active");
-        const i = parseInt(btn.getAttribute("data-fig-idx"), 10);
-        if (imgEl && imgs[i]) {
-          imgEl.src = imgs[i].src;
-          imgEl.alt = imgs[i].label;
-          capEl.innerHTML = `🔍 <em>Haz clic en la figura para ampliar a pantalla completa:</em> ${imgs[i].caption}`;
-        }
-      });
-    });
-
-    if (imgEl) {
-      imgEl.addEventListener("click", () => {
-        openLightbox(imgEl.src, capEl ? capEl.textContent : "");
-      });
-    }
-  }
-
-  // Lightbox Modal
-  function openLightbox(src, caption) {
-    const modal = document.getElementById("lightboxModal");
-    const img = document.getElementById("lightboxImg");
-    const cap = document.getElementById("lightboxCaption");
-    img.src = src;
-    cap.textContent = caption.replace("🔍 Haz clic en la figura para ampliar a pantalla completa:", "");
-    modal.classList.add("open");
-  }
-
-  window.closeLightbox = function () {
-    document.getElementById("lightboxModal").classList.remove("open");
-  };
-
-  // Navigate to a specific slide index
-  window.goToSlide = function (newIdx) {
-    if (newIdx < 0 || newIdx >= slides.length) return;
-    const prevStop = currentStopId ? getStopById(currentStopId) : null;
-    currentSlideIdx = newIdx;
-    const nextStop = getStopById(slides[currentSlideIdx].stopId);
-
-    renderRouteRibbon();
-    renderCurrentSlide();
-
-    if (!currentStopId || currentStopId !== nextStop.id) {
-      currentStopId = nextStop.id;
-      animateFlightToStop(prevStop, nextStop);
-    }
-  };
-
-  // Jump to next Flight Stop
-  window.goToNextStop = function () {
-    const curStopIdx = getStopIndex(slides[currentSlideIdx].stopId);
-    const nextStop = stops[(curStopIdx + 1) % stops.length];
-    const nextSlides = getSlidesForStop(nextStop.id);
-    if (nextSlides.length > 0) {
-      goToSlide(nextSlides[0].index);
-    }
-  };
-
-  // Layout mode switcher ("split" | "slide" | "map")
-  window.setLayoutMode = function (mode) {
-    layoutMode = mode;
-    const stage = document.getElementById("stageContainer");
-    stage.classList.remove("mode-slide", "mode-map");
-    if (mode === "slide") stage.classList.add("mode-slide");
-    if (mode === "map") stage.classList.add("mode-map");
-
-    document.querySelectorAll(".mode-btn").forEach((b) => {
-      b.classList.toggle("active", b.getAttribute("data-mode") === mode);
-    });
-
-    setTimeout(() => {
-      if (map) map.invalidateSize();
-    }, 480);
-  };
-
-  // ==========================================================
-  // INTERACTIVE SIMULATOR 1: EPIDEMIOLOGY (UTEM / CENMA)
-  // ==========================================================
-  function initEpiSimulator() {
-    const pmInput = document.getElementById("epiPm");
-    const tempInput = document.getElementById("epiTemp");
-    const canvas = document.getElementById("epiSimCanvas");
-    if (!pmInput || !canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    function draw() {
-      const pm = parseFloat(pmInput.value);
-      const temp = parseFloat(tempInput.value);
-      document.getElementById("epiPmVal").textContent = `${pm} μg/m³`;
-      document.getElementById("epiTempVal").textContent = `${temp} °C`;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Compute Relative Risk RR across Lags 0 to 6 days
-      const deltaPm = Math.max(0, pm - 20);
-      const o3Synergy = temp > 24 ? 1 + (temp - 24) * 0.012 : 1.0;
-      const lags = [0, 1, 2, 3, 4, 5, 6];
-      const weights = [0.45, 0.78, 1.0, 0.92, 0.65, 0.4, 0.25];
-      const betaIRA = 0.0028; // per ug/m3
-      const betaACV = 0.0021;
-
-      const rrIRA = lags.map((_, i) => Math.exp(betaIRA * deltaPm * weights[i]) * o3Synergy);
-      const rrACV = lags.map((_, i) => Math.exp(betaACV * deltaPm * weights[i]));
-
-      // Draw grid
-      const padL = 52, padR = 20, padT = 26, padB = 34;
-      const w = canvas.width - padL - padR;
-      const h = canvas.height - padT - padB;
-
-      ctx.strokeStyle = "rgba(148, 163, 184, 0.18)";
-      ctx.lineWidth = 1;
-      for (let i = 0; i <= 4; i++) {
-        const y = padT + (h * i) / 4;
-        ctx.beginPath();
-        ctx.moveTo(padL, y);
-        ctx.lineTo(padL + w, y);
-        ctx.stroke();
-
-        const val = (1.6 - i * 0.15).toFixed(2);
-        ctx.fillStyle = "#94a3b8";
-        ctx.font = "11px JetBrains Mono, monospace";
-        ctx.fillText(val + "x", 8, y + 4);
-      }
-
-      // Plot IRA curve (emerald) & ACV curve (rose)
-      function plotLine(data, color) {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        data.forEach((v, i) => {
-          const x = padL + (w * i) / (lags.length - 1);
-          const norm = Math.min(Math.max((v - 1.0) / 0.6, 0), 1);
-          const y = padT + h - norm * h;
-          if (i === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-
-        data.forEach((v, i) => {
-          const x = padL + (w * i) / (lags.length - 1);
-          const norm = Math.min(Math.max((v - 1.0) / 0.6, 0), 1);
-          const y = padT + h - norm * h;
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(x, y, 4.5, 0, Math.PI * 2);
-          ctx.fill();
-        });
-      }
-
-      plotLine(rrIRA, "#10b981");
-      plotLine(rrACV, "#f43f5e");
-
-      // X-axis labels
-      lags.forEach((l, i) => {
-        const x = padL + (w * i) / (lags.length - 1);
-        ctx.fillStyle = "#cbd5e1";
-        ctx.font = "11px Inter, sans-serif";
-        ctx.fillText(`Lag ${l}d`, x - 16, canvas.height - 10);
-      });
-
-      // Legend
-      ctx.fillStyle = "#10b981";
-      ctx.fillText("● IRA Respiratorias (Pudahuel)", padL + 10, 16);
-      ctx.fillStyle = "#f43f5e";
-      ctx.fillText("● Enf. Cerebrovascular ACV (Env. Poll. 2011)", padL + 210, 16);
-
-      const peakIraPct = ((Math.max(...rrIRA) - 1) * 100).toFixed(1);
-      const peakAcvPct = ((Math.max(...rrACV) - 1) * 100).toFixed(1);
-      document.getElementById("epiSimSummary").innerHTML =
-        `Con <strong>${pm} μg/m³</strong> de MP2.5 (Lag 2–3 días): incremento estimado de <strong>+${peakIraPct}%</strong> en urgencias por IRA y <strong>+${peakAcvPct}%</strong> en riesgo cerebrovascular.`;
-    }
-
-    pmInput.addEventListener("input", draw);
-    tempInput.addEventListener("input", draw);
-    draw();
-  }
-
-  // ==========================================================
-  // INTERACTIVE SIMULATOR 2: VEIN MODEL LAB (BRAZIL USP)
-  // ==========================================================
-  function initVeinSimulator() {
-    const speedIn = document.getElementById("veinSpeed");
-    const tempIn = document.getElementById("veinTemp");
-    const ethIn = document.getElementById("veinEth");
-    const ageIn = document.getElementById("veinAge");
-    const canvas = document.getElementById("veinSimCanvas");
-    if (!speedIn || !canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    function draw() {
-      const v = parseFloat(speedIn.value);
-      const temp = parseFloat(tempIn.value);
-      const eth = parseFloat(ethIn.value) / 100;
-      const age = parseFloat(ageIn.value);
-
-      document.getElementById("veinSpeedVal").textContent = `${v} km/h`;
-      document.getElementById("veinTempVal").textContent = `${temp} °C`;
-      document.getElementById("veinEthVal").textContent = `${Math.round(eth * 100)} %`;
-      document.getElementById("veinAgeVal").textContent = `${age} años`;
-
-      // Realistic speed-dependent polynomial/exponential EF curves + age degradation + ethanol effect + evaporative temperature dependence
-      const ageFactor = 1 + Math.pow(age / 12, 1.45) * 0.85;
-      const evapTempFactor = Math.exp(0.068 * (temp - 20));
-
-      function calcEF(spd) {
-        const co = (18.5 * Math.pow(spd, -0.68) + 0.0004 * Math.pow(spd - 55, 2)) * ageFactor * (1 - 0.18 * eth);
-        const nox = (1.65 * Math.pow(spd, -0.35) + 0.00018 * Math.pow(spd, 1.85)) * ageFactor * (1 - 0.12 * eth);
-        const vocEvap = (0.38 * evapTempFactor * (28 / Math.max(spd, 10))) * (1 + 0.25 * eth) * ageFactor;
-        const co2Fossil = (420 * Math.pow(spd, -0.28) + 0.015 * Math.pow(spd - 60, 2)) * (1 - 0.68 * eth);
-        return { co, nox, vocEvap, co2Fossil };
-      }
-
-      const cur = calcEF(v);
-
-      // Update KPI cards
-      document.getElementById("veinLiveKpis").innerHTML = `
-        <div class="stat-card">
-          <div class="stat-value amber">${cur.co.toFixed(2)} g/km</div>
-          <div class="stat-label">Factor de Emisión CO (Escape)</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value sky">${cur.nox.toFixed(2)} g/km</div>
-          <div class="stat-label">Factor de Emisión NOx (Precursor O₃)</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value rose">${cur.vocEvap.toFixed(2)} g/km</div>
-          <div class="stat-label">COV Evaporativos (Sensible a T = ${temp}°C)</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value emerald">${cur.co2Fossil.toFixed(0)} g/km</div>
-          <div class="stat-label">CO₂ Fósil Neto (Descuento Etanol)</div>
-        </div>
-      `;
-
-      // Draw Speed vs EF curves on left half, and 24-hour diurnal emissions on right half
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const padL = 48, padT = 28, padB = 34;
-      const chartW = (canvas.width - 120) / 2;
-      const chartH = canvas.height - padT - padB;
-
-      // LEFT CHART: Speed (10-100 km/h) vs Normalized Emission Factor
-      ctx.strokeStyle = "rgba(148, 163, 184, 0.2)";
-      ctx.lineWidth = 1;
-      for (let i = 0; i <= 4; i++) {
-        const y = padT + (chartH * i) / 4;
-        ctx.beginPath();
-        ctx.moveTo(padL, y);
-        ctx.lineTo(padL + chartW, y);
-        ctx.stroke();
-      }
-
-      ctx.fillStyle = "#e2e8f0";
-      ctx.font = "bold 12px Inter, sans-serif";
-      ctx.fillText("1) Curvas VEIN: Velocidad (10–100 km/h) vs. Emisión", padL, 18);
-
-      const speeds = [];
-      for (let s = 10; s <= 100; s += 3) speeds.push(s);
-
-      function drawSpeedCurve(extractor, maxScale, color) {
-        ctx.strokeStyle = color;
-        ctx.lineWidth = 2.6;
-        ctx.beginPath();
-        speeds.forEach((s, idx) => {
-          const val = extractor(calcEF(s));
-          const x = padL + ((s - 10) / 90) * chartW;
-          const y = padT + chartH - Math.min(val / maxScale, 1) * chartH;
-          if (idx === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-      }
-
-      drawSpeedCurve((d) => d.co, 14, "#f59e0b");
-      drawSpeedCurve((d) => d.nox, 4.5, "#38bdf8");
-      drawSpeedCurve((d) => d.vocEvap, 4.5, "#f43f5e");
-
-      // Current Speed Vertical Marker
-      const curX = padL + ((v - 10) / 90) * chartW;
-      ctx.strokeStyle = "#ffffff";
-      ctx.setLineDash([4, 4]);
-      ctx.beginPath();
-      ctx.moveTo(curX, padT);
-      ctx.lineTo(curX, padT + chartH);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      ctx.fillStyle = "#94a3b8";
-      ctx.font = "11px JetBrains Mono, monospace";
-      ctx.fillText("10 km/h (Congestión)", padL, canvas.height - 10);
-      ctx.fillText("100 km/h (Autopista)", padL + chartW - 125, canvas.height - 10);
-
-      // RIGHT CHART: 24-Hour Urban Emissions Profile (Morning & Evening Rush + Afternoon Evaporative Peak)
-      const rightX0 = padL + chartW + 52;
-      ctx.fillStyle = "#e2e8f0";
-      ctx.font = "bold 12px Inter, sans-serif";
-      ctx.fillText("2) Perfil Horario Urbano (00:00 a 23:00 LT)", rightX0, 18);
-
-      const hourlyFlow = [
-        0.15, 0.10, 0.08, 0.09, 0.18, 0.45, 0.85, 1.00, 0.92, 0.72, 0.65, 0.68,
-        0.74, 0.70, 0.72, 0.78, 0.88, 0.98, 0.95, 0.76, 0.55, 0.42, 0.30, 0.20
-      ];
-      const diurnalTemp = [
-        -4, -5, -5, -6, -5, -4, -2, 0, 2, 4, 6, 8,
-        9.5, 10.5, 11, 10, 8.5, 6, 4, 2, 0, -1, -2, -3
-      ];
-
-      const barW = chartW / 24 - 3;
-      hourlyFlow.forEach((fl, h) => {
-        const localT = temp + diurnalTemp[h] * 0.45;
-        const localEvap = cur.vocEvap * Math.exp(0.05 * (localT - temp));
-        const exhaustLoad = fl * (cur.nox * 0.35 + cur.co * 0.08);
-        const evapLoad = fl * localEvap * 0.55;
-
-        const x = rightX0 + h * (barW + 3);
-        const hEx = Math.min((exhaustLoad / 2.8) * chartH, chartH * 0.75);
-        const hEv = Math.min((evapLoad / 2.8) * chartH, chartH - hEx);
-
-        // Exhaust bar
-        ctx.fillStyle = "rgba(56, 189, 248, 0.78)";
-        ctx.fillRect(x, padT + chartH - hEx, barW, hEx);
-
-        // Evaporative VOC stacked bar
-        ctx.fillStyle = "rgba(244, 63, 94, 0.85)";
-        ctx.fillRect(x, padT + chartH - hEx - hEv, barW, hEv);
-
-        if (h % 4 === 0) {
-          ctx.fillStyle = "#94a3b8";
-          ctx.font = "10px JetBrains Mono, monospace";
-          ctx.fillText(`${h}h`, x, canvas.height - 10);
-        }
-      });
-    }
-
-    [speedIn, tempIn, ethIn, ageIn].forEach((el) => el.addEventListener("input", draw));
-    draw();
-  }
-
-  // ==========================================================
-  // INTERACTIVE SIMULATOR 3: STREET CANYON MUNICH + VEIN (FRANCE)
-  // ==========================================================
-  function initCanyonSimulator() {
-    const hwIn = document.getElementById("canyonHw");
-    const windIn = document.getElementById("canyonWind");
-    const canvas = document.getElementById("canyonSimCanvas");
-    if (!hwIn || !canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    function draw() {
-      const hw = parseFloat(hwIn.value);
-      const u0 = parseFloat(windIn.value);
-
-      const regime =
-        hw < 0.7 ? "Flujo Aislado" : hw < 1.4 ? "Interferencia de Estela" : "Vórtice Skimming (Trampa)";
-      document.getElementById("canyonHwVal").textContent = `H/W = ${hw.toFixed(1)} (${regime})`;
-      document.getElementById("canyonWindVal").textContent = `${u0.toFixed(1)} m/s`;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      // Draw buildings on left and right of street canyon
-      const groundY = canvas.height - 28;
-      const canyonW = Math.max(70, Math.min(180, 150 / Math.sqrt(hw)));
-      const bldgH = Math.min(groundY - 32, canyonW * hw * 0.65);
-      const centerX = canvas.width * 0.34;
-      const leftRoad = centerX - canyonW / 2;
-      const rightRoad = centerX + canyonW / 2;
-
-      // Plume fill inside canyon
-      const trapFactor = Math.min(1, (hw / u0) * 0.75);
-      const grad = ctx.createLinearGradient(0, groundY, 0, groundY - bldgH);
-      grad.addColorStop(0, `rgba(244, 63, 94, ${0.35 + trapFactor * 0.55})`);
-      grad.addColorStop(1, `rgba(56, 189, 248, ${0.12 + trapFactor * 0.25})`);
-      ctx.fillStyle = grad;
-      ctx.fillRect(leftRoad, groundY - bldgH, canyonW, bldgH);
-
-      // Left & Right Buildings
-      ctx.fillStyle = "#1e293b";
-      ctx.strokeStyle = "#64748b";
-      ctx.lineWidth = 2;
-      ctx.fillRect(leftRoad - 52, groundY - bldgH, 52, bldgH);
-      ctx.strokeRect(leftRoad - 52, groundY - bldgH, 52, bldgH);
-      ctx.fillRect(rightRoad, groundY - bldgH, 52, bldgH);
-      ctx.strokeRect(rightRoad, groundY - bldgH, 52, bldgH);
-
-      // Vortex recirculation ellipse inside canyon
-      ctx.strokeStyle = "#f59e0b";
-      ctx.lineWidth = 2.2;
-      ctx.setLineDash([5, 4]);
-      ctx.beginPath();
-      ctx.ellipse(centerX, groundY - bldgH * 0.5, canyonW * 0.34, bldgH * 0.36, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Ground street
-      ctx.fillStyle = "#334155";
-      ctx.fillRect(20, groundY, canvas.width - 40, 6);
-
-      // Right side quantitative bars: Pedestrian NOx vs O3 (titration)
-      const noxConc = Math.round(35 + (145 * hw) / (u0 + 0.6));
-      const o3Bg = 68;
-      const o3Canyon = Math.max(6, Math.round(o3Bg * Math.exp(-0.011 * noxConc)));
-
-      const barBaseX = canvas.width * 0.66;
-      const maxBarH = groundY - 45;
-
-      // NOx Bar
-      const noxH = Math.min(maxBarH, (noxConc / 260) * maxBarH);
-      ctx.fillStyle = "#f43f5e";
-      ctx.fillRect(barBaseX, groundY - noxH, 46, noxH);
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 12px JetBrains Mono, monospace";
-      ctx.fillText(`${noxConc}`, barBaseX + 6, groundY - noxH - 6);
-      ctx.fillStyle = "#cbd5e1";
-      ctx.font = "11px Inter, sans-serif";
-      ctx.fillText("NOx (ppb)", barBaseX - 2, groundY + 18);
-
-      // O3 Bar
-      const o3H = Math.min(maxBarH, (o3Canyon / 100) * maxBarH);
-      ctx.fillStyle = "#10b981";
-      ctx.fillRect(barBaseX + 74, groundY - o3H, 46, o3H);
-      ctx.fillStyle = "#fff";
-      ctx.font = "bold 12px JetBrains Mono, monospace";
-      ctx.fillText(`${o3Canyon}`, barBaseX + 84, groundY - o3H - 6);
-      ctx.fillStyle = "#cbd5e1";
-      ctx.font = "11px Inter, sans-serif";
-      ctx.fillText("O₃ (ppb)", barBaseX + 74, groundY + 18);
-
-      document.getElementById("canyonSimSummary").innerHTML =
-        `A nivel peatonal (VEIN + MUNICH): <strong>NOx = ${noxConc} ppb</strong> y <strong>O₃ = ${o3Canyon} ppb</strong> (titulación fotoquímica NO + O₃ → NO₂ dentro del vórtice urbano).`;
-    }
-
-    hwIn.addEventListener("input", draw);
-    windIn.addEventListener("input", draw);
-    draw();
-  }
-
-  // ==========================================================
-  // INTERACTIVE SIMULATOR 4: STRATOSPHERIC AEROSOL (NOAA ARL / UMD)
-  // ==========================================================
-  function initStratoSimulator() {
-    const massIn = document.getElementById("saiMass");
-    const altIn = document.getElementById("saiAlt");
-    const stnIn = document.getElementById("saiStn");
-    const partIn = document.getElementById("saiPart");
-    const canvas = document.getElementById("saiSimCanvas");
-    if (!massIn || !canvas) return;
-    const ctx = canvas.getContext("2d");
-
-    function draw() {
-      const mass = parseFloat(massIn.value); // tons
-      const alt = parseFloat(altIn.value); // km
-      const stn = parseInt(stnIn.value, 10);
-      const numpar = parseInt(partIn.value, 10);
-
-      document.getElementById("saiMassVal").textContent = `${mass} t SO₂`;
-      document.getElementById("saiAltVal").textContent = `${alt} km`;
-      document.getElementById("saiStnVal").textContent = `${stn} sitios`;
-      document.getElementById("saiPartVal").textContent = `${numpar.toLocaleString("en-US")} / nivel`;
-
-      // Compute detection probability curve over 30 days
-      const zonalSpeed = 14 + (alt - 15) * 2.1; // m/s stratospheric wind
-      const dlCutoff = (1e-7 / (mass * 1e6)).toExponential(1); // m^-3
-      const peakPod = Math.min(0.99, 1 - Math.exp(-0.0022 * mass * Math.sqrt(stn) * (numpar / 15000)));
-
-      document.getElementById("saiLiveKpis").innerHTML = `
-        <div class="stat-card">
-          <div class="stat-value emerald">${(peakPod * 100).toFixed(1)} %</div>
-          <div class="stat-label">Probabilidad Máx. de Detección (POD)</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value amber">${dlCutoff} m⁻³</div>
-          <div class="stat-label">Umbral TCM (DL / Q_SAI)</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value sky">${zonalSpeed.toFixed(0)} m/s</div>
-          <div class="stat-label">Transporte Zonal Estratosférico (${alt} km)</div>
-        </div>
-        <div class="stat-card">
-          <div class="stat-value rose">${numpar >= 20000 ? "Convergente ✅" : "Sub-muestreado ⚠️"}</div>
-          <div class="stat-label">Estado Lagrangiano (14,000 km)</div>
-        </div>
-      `;
-
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-
-      const padL = 54, padR = 24, padT = 28, padB = 34;
-      const w = canvas.width - padL - padR;
-      const h = canvas.height - padT - padB;
-
-      // Grid lines
-      ctx.strokeStyle = "rgba(148, 163, 184, 0.18)";
-      for (let i = 0; i <= 4; i++) {
-        const y = padT + (h * i) / 4;
-        ctx.beginPath();
-        ctx.moveTo(padL, y);
-        ctx.lineTo(padL + w, y);
-        ctx.stroke();
-        ctx.fillStyle = "#94a3b8";
-        ctx.font = "11px JetBrains Mono, monospace";
-        ctx.fillText(`${100 - i * 25}%`, 10, y + 4);
-      }
-
-      // Draw POD(t) over Days 1..30 for Standard Discrete vs GMM/KDE Interpolated
-      const days = [];
-      for (let d = 1; d <= 30; d++) days.push(d);
-
-      function getPodAtDay(d, isGmm) {
-        const transitDay = Math.max(3, 16 - (alt - 15) * 0.6);
-        const spread = 5.5 + (d * 0.25);
-        const pulse = Math.exp(-Math.pow(d - transitDay, 2) / (2 * spread));
-        const noise = !isGmm && numpar < 15000 ? Math.sin(d * 2.7) * 0.08 : 0;
-        const boost = isGmm ? 1.08 : 1.0;
-        return Math.max(0, Math.min(0.99, peakPod * pulse * boost + noise));
-      }
-
-      // Plot Discrete HYSPLIT curve
-      ctx.strokeStyle = "#38bdf8";
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      days.forEach((d, idx) => {
-        const val = getPodAtDay(d, false);
-        const x = padL + ((d - 1) / 29) * w;
-        const y = padT + h - val * h;
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-
-      // Plot GMM / KDE Continuous Surface curve
-      ctx.strokeStyle = "#f59e0b";
-      ctx.lineWidth = 3;
-      ctx.beginPath();
-      days.forEach((d, idx) => {
-        const val = getPodAtDay(d, true);
-        const x = padL + ((d - 1) / 29) * w;
-        const y = padT + h - val * h;
-        if (idx === 0) ctx.moveTo(x, y);
-        else ctx.lineTo(x, y);
-      });
-      ctx.stroke();
-
-      // Labels
-      ctx.fillStyle = "#38bdf8";
-      ctx.font = "bold 12px Inter, sans-serif";
-      ctx.fillText("━ HYSPLIT Conteo Discreto de Parcelas", padL + 10, 18);
-      ctx.fillStyle = "#f59e0b";
-      ctx.fillText("━ HYSPLIT + Interpolación GMM / KDE (UMD & NOAA ARL 2026)", padL + 290, 18);
-
-      [1, 5, 10, 15, 20, 25, 30].forEach((d) => {
-        const x = padL + ((d - 1) / 29) * w;
-        ctx.fillStyle = "#94a3b8";
-        ctx.font = "11px JetBrains Mono, monospace";
-        ctx.fillText(`Día ${d}`, x - 14, canvas.height - 10);
-      });
-    }
-
-    [massIn, altIn, stnIn, partIn].forEach((el) => el.addEventListener("input", draw));
-    draw();
-  }
-
-  // ==========================================================
-  // INITIALIZE DECK & KEYBOARD SHORTCUTS
-  // ==========================================================
-  window.addEventListener("DOMContentLoaded", () => {
-    initMap();
-    goToSlide(0);
-
-    // Button listeners
-    document.getElementById("prevSlideBtn").addEventListener("click", () => goToSlide(currentSlideIdx - 1));
-    document.getElementById("nextSlideBtn").addEventListener("click", () => goToSlide(currentSlideIdx + 1));
-    document.getElementById("nextStopBtn").addEventListener("click", () => goToNextStop());
-
-    document.querySelectorAll(".mode-btn").forEach((btn) => {
-      btn.addEventListener("click", () => setLayoutMode(btn.getAttribute("data-mode")));
-    });
-
-    document.getElementById("notesToggleBtn").addEventListener("click", () => {
-      document.getElementById("notesDrawer").classList.toggle("open");
-    });
-
-    document.getElementById("fullscreenBtn").addEventListener("click", () => {
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      } else {
-        document.exitFullscreen().catch(() => {});
-      }
-    });
-
-    // Keyboard navigation
-    window.addEventListener("keydown", (e) => {
-      if (e.target.tagName === "INPUT") return;
-      if (e.key === "ArrowRight" || e.key === " ") {
-        e.preventDefault();
-        goToSlide(currentSlideIdx + 1);
-      } else if (e.key === "ArrowLeft") {
-        e.preventDefault();
-        goToSlide(currentSlideIdx - 1);
-      } else if (e.key === "ArrowDown") {
-        e.preventDefault();
-        goToNextStop();
-      } else if (e.key === "m" || e.key === "M") {
-        const nextMode = layoutMode === "split" ? "slide" : layoutMode === "slide" ? "map" : "split";
-        setLayoutMode(nextMode);
-      } else if (e.key === "n" || e.key === "N") {
-        document.getElementById("notesDrawer").classList.toggle("open");
-      } else if (e.key === "f" || e.key === "F") {
-        document.getElementById("fullscreenBtn").click();
-      } else if (e.key === "Escape") {
-        closeLightbox();
-        document.getElementById("notesDrawer").classList.remove("open");
-      }
+    dialog.addEventListener('click', event => {
+      if (event.target !== dialog) return;
+      const rect = dialog.getBoundingClientRect();
+      if (event.clientX < rect.left || event.clientX > rect.right || event.clientY < rect.top || event.clientY > rect.bottom) dialog.close();
     });
   });
+
+  document.addEventListener('keydown', event => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.target.closest('input, textarea, select, [contenteditable="true"]')) return;
+    if ($('lightbox').open && ['ArrowLeft', 'ArrowRight'].includes(event.key)) {
+      event.preventDefault();
+      stepImage(event.key === 'ArrowRight' ? 1 : -1);
+      return;
+    }
+    if (document.querySelector('dialog[open]')) return;
+    if (event.key === 'Escape') {
+      if (!$('notesPanel').hidden) toggleNotes();
+      return;
+    }
+    if ((event.key === ' ' || event.key === 'Enter') && event.target.closest('button, a, summary')) return;
+    const key = event.key.toLowerCase();
+    const actions = {
+      arrowright: () => step(1), pagedown: () => step(1), ' ': () => step(1),
+      arrowleft: () => step(-1), pageup: () => step(-1),
+      arrowdown: () => stepChapter(1), arrowup: () => stepChapter(-1),
+      home: () => goToSlide(0), end: () => goToSlide(slides.length - 1),
+      f: fullscreen, n: toggleNotes, g: toggleGlobe, m: () => openDialog('routeDialog'),
+      '?': () => openDialog('helpDialog'),
+    };
+    if (actions[key]) { event.preventDefault(); actions[key](); }
+  });
+
+  let touch;
+  $('story').addEventListener('touchstart', event => {
+    touch = null;
+    if (event.touches.length !== 1 || event.target.closest('a, button, input, textarea, select')) return;
+    touch = { x: event.touches[0].clientX, y: event.touches[0].clientY };
+  }, { passive: true });
+  $('story').addEventListener('touchend', event => {
+    if (!touch) return;
+    const dx = event.changedTouches[0].clientX - touch.x;
+    const dy = event.changedTouches[0].clientY - touch.y;
+    touch = null;
+    if (Math.abs(dx) > 65 && Math.abs(dx) > Math.abs(dy) * 1.8) step(dx < 0 ? 1 : -1);
+  }, { passive: true });
+  $('story').addEventListener('touchcancel', () => { touch = null; }, { passive: true });
+
+  window.addEventListener('hashchange', () => readHash());
+  window.addEventListener('popstate', () => readHash());
+  buildNavigation();
+  if (window.d3?.geoOrthographic && window.JourneyGlobe) {
+    try { globe = new JourneyGlobe($('globeCanvas'), trips, id => showTrip(id)); }
+    catch { /* The story and route remain usable when canvas is unavailable. */ }
+  }
+  if (!globe) {
+    $('globeCanvas').hidden = true;
+    $('globeWrap').insertAdjacentHTML('afterbegin', '<div class="image-fallback"><h3>Un mundo de caminos.</h3><p>Abre «El recorrido» para elegir un destino.</p></div>');
+  }
+  readHash({ initial: true });
+  document.fonts?.ready.then(() => globe?.draw());
+  window.presentation = { goToSlide, showTrip, getCurrent: () => ({ index: currentIndex, trip: currentTrip?.id || null, id: activeSlide().id }) };
 })();

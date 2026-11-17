@@ -1,0 +1,5 @@
+/Sergio_CV_*.md
+node_modules/
+.DS_Store
+.env
+.env.*

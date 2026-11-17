@@ -1,138 +1,154 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
-<head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>De la UTEM para el Mundo — Dr. Sergio Ibarra-Espinosa (2026)</title>
-  <meta name="description" content="Charla de UTEM para el mundo: Trayectoria de un Ingeniero en Prevención de Riesgos y Medio Ambiente — Dr. Sergio Ibarra-Espinosa (CISESS / University of Maryland & NOAA ARL)" />
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f4f2e9" />
+    <title>De la UTEM para el mundo · Sergio Ibarra-Espinosa</title>
+    <meta name="description" content="Un recorrido por la trayectoria de Sergio Ibarra-Espinosa: de Ingeniería en Prevención de Riesgos y Medio Ambiente en la UTEM a la ciencia atmosférica alrededor del mundo." />
+    <meta property="og:title" content="De la UTEM para el mundo" />
+    <meta property="og:description" content="Una trayectoria en ciencia, contada a través de sus lugares. Sergio Ibarra-Espinosa." />
+    <meta property="og:type" content="website" />
+    <meta property="og:locale" content="es_CL" />
+    <meta property="og:url" content="https://ibarraespinosa.github.io/utem2026/" />
+    <meta property="og:image" content="https://ibarraespinosa.github.io/utem2026/assets/sergio_nyc.jpg" />
+    <meta property="og:image:alt" content="Sergio Ibarra-Espinosa con Nueva York al fondo" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <link rel="canonical" href="https://ibarraespinosa.github.io/utem2026/" />
+    <link rel="icon" href="assets/favicon.svg" type="image/svg+xml" />
+    <link rel="stylesheet" href="assets/fonts/fonts.css" />
+    <link rel="stylesheet" href="styles.css" />
+    <script defer src="assets/vendor/d3-array.min.js"></script>
+    <script defer src="assets/vendor/d3-geo.min.js"></script>
+    <script defer src="assets/vendor/topojson-client.min.js"></script>
+    <script defer src="assets/world.js"></script>
+    <script defer src="slides-data.js"></script>
+    <script defer src="photos-data.js"></script>
+    <script defer src="globe.js"></script>
+    <script defer src="app.js"></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#story">Ir al contenido</a>
+    <svg class="icon-library" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+      <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15M13 5l7 7-7 7" /></symbol>
+      <symbol id="i-diagonal" viewBox="0 0 24 24"><path d="M6 18 18 6M6 6h12v12" /></symbol>
+      <symbol id="i-expand" viewBox="0 0 24 24"><path d="M8 4H4v4m12-4h4v4M4 16v4h4m12-4v4h-4" /></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path d="m6 6 12 12M6 18 18 6" /></symbol>
+      <symbol id="i-globe" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><ellipse cx="12" cy="12" rx="4" ry="9" /><path d="M3 12h18" /></symbol>
+      <symbol id="i-note" viewBox="0 0 24 24"><path d="M14 3H5v18h14V8Zm0 0v5h5M8 12h8m-8 4h5" /></symbol>
+      <symbol id="i-photo" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="8" cy="9" r="1.5" /><path d="m3 17 5-5 4 4 4-6 5 7" /></symbol>
+      <symbol id="i-help" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" /><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3h.01" /></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path d="M19 10c0 5-7 11-7 11S5 15 5 10a7 7 0 0 1 14 0Z" /><circle cx="12" cy="10" r="2" /></symbol>
+    </svg>
 
-  <!-- Google Fonts -->
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600;700;800&family=Plus+Jakarta+Sans:wght@600;700;800&display=swap" rel="stylesheet" />
+    <div class="site-shell">
+      <header class="site-header">
+        <a class="brand" href="#inicio" aria-label="De la UTEM para el mundo, inicio">
+          <img class="utem-logo" src="assets/logos/utem.svg" width="156" height="55" alt="Universidad Tecnológica Metropolitana" />
+          <span class="brand-name">De la UTEM<span>para el mundo</span></span>
+        </a>
+        <span class="header-edition">UNA TRAYECTORIA EN CIENCIA <span> / </span> 2003—2026</span>
+        <nav class="header-nav" aria-label="Navegación principal">
+          <button class="text-button" data-dialog="routeDialog">El recorrido</button>
+          <button class="text-button" data-dialog="resourcesDialog">Recursos <svg class="icon"><use href="#i-diagonal" /></svg></button>
+          <button class="present-button" id="presentButton" aria-label="Presentar en pantalla completa" title="Pantalla completa (F)"><svg class="icon" aria-hidden="true"><use href="#i-expand" /></svg><span>Presentar</span></button>
+        </nav>
+      </header>
 
-  <!-- Leaflet 1.9.4 for Interactive World Flight Map -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="" />
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+      <main class="stage is-cover" id="stage" aria-label="Presentación">
+        <section class="story" id="story" tabindex="-1" aria-labelledby="slideTitle"></section>
+        <section class="visual" id="visual" aria-label="Mapa y fotografías de la trayectoria">
+          <div class="atlas-heading"><span id="atlasLabel">UN VIAJE QUE EMPEZÓ EN SANTIAGO</span><svg class="icon"><use href="#i-globe" /></svg></div>
+          <div class="visual-surface" id="visualSurface">
+            <div class="globe-wrap" id="globeWrap">
+              <canvas id="globeCanvas" role="img" aria-label="Globo interactivo con la ruta de Sergio. Arrastra para girarlo; las paradas también están disponibles en El recorrido."></canvas>
+              <span class="globe-north" aria-hidden="true">N<br><span>↑</span></span>
+              <div class="globe-origin" id="globeOrigin"><span class="location-dot"></span><span>Santiago, Chile<small>33.45° S / 70.65° O</small></span></div>
+              <div class="globe-note" id="globeNote">El punto de partida<svg viewBox="0 0 100 45" aria-hidden="true"><path d="M3 8c48-16 45 31 91 25m-9-8 10 8-10 7" /></svg></div>
+              <span class="globe-instruction">ARRASTRA PARA EXPLORAR</span>
+            </div>
+            <div class="media-layer" id="mediaLayer"></div>
+            <div class="travel-label" id="travelLabel" aria-hidden="true"><span>EN CAMINO</span><strong id="travelDestination"></strong><div class="travel-line"></div></div>
+          </div>
+          <div class="visual-footer">
+            <p id="visualCaption">Un recorrido por los lugares, las preguntas y las personas que hacen una trayectoria.</p>
+            <button class="icon-button" id="globeToggle" aria-label="Ver globo" aria-pressed="false" title="Alternar fotografía y globo (G)" hidden><svg class="icon"><use href="#i-globe" /></svg></button>
+          </div>
+        </section>
+      </main>
 
-  <!-- Custom Styles -->
-  <link rel="stylesheet" href="styles.css" />
-</head>
-<body>
-
-  <!-- TOP FLIGHT HUD HEADER -->
-  <header class="hud-header">
-    <div class="brand-cluster">
-      <div class="utem-badge">
-        <span>✈️ UTEM → MUNDO</span>
-      </div>
-      <div class="talk-meta">
-        <div class="talk-title-top">De la UTEM para el Mundo: Trayectoria de un Ing. en Prevención de Riesgos y Medio Ambiente</div>
-        <div class="talk-sub-top">Dr. Sergio Ibarra-Espinosa · CISESS / Univ. of Maryland &amp; NOAA ARL · Campus Ñuñoa, 17 Nov 2026</div>
-      </div>
-    </div>
-
-    <div class="telemetry-bar">
-      <div class="telemetry-item">
-        <span class="telemetry-label">Estación</span>
-        <span class="telemetry-val amber" id="telCode">SCL / UTEM</span>
-      </div>
-      <div class="telemetry-item">
-        <span class="telemetry-label">Etapa</span>
-        <span class="telemetry-val" id="telPeriod">2003 – 2007</span>
-      </div>
-      <div class="telemetry-item">
-        <span class="telemetry-label">Vuelo Acumulado</span>
-        <span class="telemetry-val emerald" id="telDist">0 km</span>
-      </div>
-    </div>
-
-    <div class="hud-controls">
-      <button class="hud-btn mode-btn active" data-mode="split" title="Vista Dividida: Mapa + Diapositiva (Tecla M)">
-        🗺️+📊 Split
-      </button>
-      <button class="hud-btn mode-btn" data-mode="slide" title="Modo Auditorio: Diapositiva 100% (Tecla M)">
-        🖥️ Slide 100%
-      </button>
-      <button class="hud-btn mode-btn" data-mode="map" title="Explorar Mapa Mundial 100% (Tecla M)">
-        🌍 Mapa 100%
-      </button>
-      <button class="hud-btn" id="notesToggleBtn" title="Ver Notas de Orador (Tecla N)">
-        📝 Notas
-      </button>
-      <button class="hud-btn" id="fullscreenBtn" title="Pantalla Completa (Tecla F)">
-        ⛶ Full
-      </button>
-    </div>
-  </header>
-
-  <!-- INTERACTIVE ROUTE RIBBON (10 STOPS) -->
-  <nav class="route-ribbon" id="routeRibbon" aria-label="Paradas de la trayectoria"></nav>
-
-  <!-- MAIN SPLIT / FULL STAGE -->
-  <main class="stage-container" id="stageContainer">
-    <!-- LEFT: INTERACTIVE WORLD FLIGHT MAP -->
-    <section class="map-panel" aria-label="Mapa de vuelo mundial">
-      <div id="worldMap"></div>
-
-      <div class="map-overlay-card">
-        <div class="map-stop-info">
-          <div class="map-stop-tag" id="mapStopTag">PARADA 1 DE 10 · 2003–2007</div>
-          <div class="map-stop-name" id="mapStopName">Campus Ñuñoa, Santiago, Chile</div>
-          <div class="map-stop-coords" id="mapStopCoords">UTEM · Ingeniería en Prevención de Riesgos y Medio Ambiente</div>
+      <footer class="journey-footer">
+        <div class="journey-main">
+          <div class="route-label">EL RECORRIDO <svg class="icon"><use href="#i-arrow" /></svg></div>
+          <nav class="route-track" id="routeTrack" aria-label="Etapas de la trayectoria"></nav>
+          <div class="slide-controls">
+            <span class="slide-counter" id="slideCounter"><strong id="slideNumber">01</strong><span> / </span><span id="slideTotal"></span></span>
+            <button class="arrow-button previous" id="previousButton" aria-label="Diapositiva anterior" title="Anterior (←)"><svg class="icon"><use href="#i-arrow" /></svg></button>
+            <button class="arrow-button next" id="nextButton" aria-label="Diapositiva siguiente" title="Siguiente (→)"><svg class="icon"><use href="#i-arrow" /></svg></button>
+          </div>
         </div>
-        <div class="map-quick-actions">
-          <button class="hud-btn" onclick="window.showWorldOverview()" title="Ver todas las rutas del mundo">
-            🌐 Ver Mundo Completo
-          </button>
+        <div class="footer-detail">
+          <span id="footerContext">SERGIO IBARRA-ESPINOSA <span class="detail-divider">/</span> CHARLA · CONVERSATORIO</span>
+          <div class="footer-tools"><span class="keyboard-hint"><kbd>←</kbd><kbd>→</kbd> para recorrer</span><button class="quiet-button" id="notesButton" aria-expanded="false" aria-controls="notesPanel"><svg class="icon"><use href="#i-note" /></svg>Notas</button><button class="quiet-button" data-dialog="helpDialog" aria-label="Ver controles y atajos"><svg class="icon"><use href="#i-help" /></svg></button></div>
         </div>
+        <div class="reading-progress" aria-hidden="true"><span id="progressFill"></span></div>
+      </footer>
+    </div>
+
+    <aside class="notes-panel" id="notesPanel" aria-labelledby="notesTitle" hidden>
+      <div class="panel-top"><span class="eyebrow" id="notesTitle">NOTAS PARA CONTARLO</span><button class="icon-button" id="closeNotes" aria-label="Cerrar notas"><svg class="icon"><use href="#i-close" /></svg></button></div>
+      <h2 id="notesHeading"></h2><p id="notesContent"></p><p class="notes-hint">Estas notas se ven en esta pantalla. Pulsa N para ocultarlas.</p>
+    </aside>
+
+    <dialog class="route-dialog" id="routeDialog" aria-labelledby="routeTitle">
+      <div class="dialog-top"><span class="eyebrow">EL RECORRIDO</span><button class="icon-button" data-close aria-label="Cerrar recorrido"><svg class="icon"><use href="#i-close" /></svg></button></div>
+      <h2 id="routeTitle">La ciencia también<br>te lleva <em>lejos.</em></h2>
+      <p class="dialog-intro">Recorre la historia en orden o elige un lugar del archivo de viajes. Cada regreso tiene su propia historia.</p>
+      <div class="route-views" role="group" aria-label="Vista del recorrido">
+        <button class="route-view" data-route-view="story" aria-pressed="true" aria-controls="routeStoryPanel">La historia</button>
+        <button class="route-view" data-route-view="archive" aria-pressed="false" aria-controls="routeArchivePanel">Archivo de viajes</button>
       </div>
-    </section>
+      <label class="route-search" for="routeSearch"><span>Buscar un lugar, año o tema</span><input id="routeSearch" type="search" placeholder="Japón, 2018, VEIN…" autocomplete="off" /></label>
+      <p class="route-results" id="routeResults" role="status"></p>
+      <section id="routeStoryPanel" aria-label="Etapas de la historia"><div class="route-grid" id="routeGrid"></div></section>
+      <section id="routeArchivePanel" aria-label="Archivo de viajes" hidden>
+        <div class="trip-filters" id="tripFilters" role="group" aria-label="Filtrar viajes por región"></div>
+        <div class="trip-list" id="tripList"></div>
+      </section>
+      <div class="route-empty" id="routeEmpty" hidden><p>No encontramos una parada con esa búsqueda.</p><button class="text-button" data-reset-route>Ver todas las paradas <svg class="icon"><use href="#i-arrow" /></svg></button></div>
+      <button class="text-button restart-button" data-slide="0">Volver a la portada <svg class="icon"><use href="#i-arrow" /></svg></button>
+    </dialog>
 
-    <!-- RIGHT: SCIENTIFIC & JOURNEY SLIDE DECK -->
-    <section class="slide-panel" id="slideStage" aria-live="polite"></section>
-  </main>
+    <dialog class="resources-dialog" id="resourcesDialog" aria-labelledby="resourcesTitle">
+      <div class="dialog-top"><span class="eyebrow">PARA DESPUÉS DE LA CHARLA</span><button class="icon-button" data-close aria-label="Cerrar recursos"><svg class="icon"><use href="#i-close" /></svg></button></div>
+      <h2 id="resourcesTitle">La conversación<br><em>sigue abierta.</em></h2>
+      <p class="dialog-intro">Código, cursos y algunas puertas de entrada a la ciencia atmosférica.</p>
+      <div class="resource-list" id="resourceList"></div>
+      <div class="resource-qr"><a href="https://ibarraespinosa.github.io/" target="_blank" rel="noopener"><img src="assets/qr.png" width="110" height="110" alt="Código QR del sitio personal de Sergio Ibarra-Espinosa"></a><p>Escanea para guardar mi sitio, explorar los proyectos y seguir en contacto.</p></div>
+      <a class="contact-link" href="mailto:zergioibarra@gmail.com">zergioibarra@gmail.com <svg class="icon"><use href="#i-diagonal" /></svg></a>
+      <details class="credits"><summary>Sobre esta charla y créditos</summary><p>Invitación de la Dirección del Departamento de Física y el Decanato de la Facultad de Ciencias Naturales, Matemática y del Medioambiente, UTEM. 17 de noviembre de 2026, 10:00 h. Café conversatorio durante la primera media hora y luego exposición. Multisala de la Biblioteca Ximena Sánchez S., Campus Ñuñoa.</p><p>Trayectoria y fechas basadas en el CV de Sergio Ibarra-Espinosa, noviembre de 2026, y los viajes indicados por el expositor. Fotografías personales y figuras: archivo del expositor. Las fotografías de ciudades son imágenes de contexto; sus fuentes se indican junto a cada imagen. Cartografía: Natural Earth. Tipografías: Instrument Serif y DM Sans.</p><a href="assets/CREDITS.md" target="_blank" rel="noopener">Créditos de imágenes y bibliotecas ↗</a></details>
+    </dialog>
 
-  <!-- BOTTOM NAVIGATION DECK BAR -->
-  <footer class="bottom-deck-bar">
-    <div class="progress-wrap">
-      <div class="progress-track">
-        <div class="progress-fill" id="progressFill" style="width: 6%;"></div>
+    <dialog class="help-dialog" id="helpDialog" aria-labelledby="helpTitle">
+      <div class="dialog-top"><span class="eyebrow">A TU RITMO</span><button class="icon-button" data-close aria-label="Cerrar ayuda"><svg class="icon"><use href="#i-close" /></svg></button></div>
+      <h2 id="helpTitle">Cómo recorrerlo.</h2>
+      <dl class="shortcut-list"><div><dt><kbd>→</kbd> <kbd>Espacio</kbd></dt><dd>Siguiente diapositiva</dd></div><div><dt><kbd>←</kbd></dt><dd>Diapositiva anterior</dd></div><div><dt><kbd>↓</kbd> <kbd>↑</kbd></dt><dd>Siguiente / anterior etapa</dd></div><div><dt><kbd>Inicio</kbd> <kbd>Fin</kbd></dt><dd>Primera / última diapositiva</dd></div><div><dt><kbd>F</kbd></dt><dd>Pantalla completa</dd></div><div><dt><kbd>G</kbd></dt><dd>Ver el globo o la fotografía</dd></div><div><dt><kbd>M</kbd></dt><dd>Abrir el recorrido</dd></div><div><dt><kbd>N</kbd></dt><dd>Mostrar / ocultar notas</dd></div><div><dt><kbd>?</kbd></dt><dd>Ver esta ayuda</dd></div><div><dt><kbd>Esc</kbd></dt><dd>Cerrar una ventana</dd></div></dl>
+      <p class="dialog-intro">En el teléfono, usa las flechas o desliza sobre el texto. Toca las fotografías para ampliarlas.</p>
+      <p class="dialog-intro">En el visor de imágenes, las flechas recorren la galería. En el archivo de viajes, recorren los destinos; «Volver al relato» recupera tu lugar en la charla.</p>
+      <label class="motion-option"><input type="checkbox" id="motionToggle" /> Reducir las animaciones de viaje</label>
+    </dialog>
+
+    <dialog class="lightbox" id="lightbox" aria-label="Imagen ampliada">
+      <button class="icon-button" data-close aria-label="Cerrar imagen"><svg class="icon"><use href="#i-close" /></svg></button>
+      <img id="lightboxImage" alt="" /><p id="lightboxCaption" aria-live="polite"></p>
+      <div class="lightbox-controls" id="lightboxControls" role="group" aria-label="Recorrer imágenes">
+        <button class="arrow-button previous" id="lightboxPrevious" aria-label="Imagen anterior"><svg class="icon"><use href="#i-arrow" /></svg></button>
+        <span id="lightboxCounter"></span>
+        <button class="arrow-button" id="lightboxNext" aria-label="Imagen siguiente"><svg class="icon"><use href="#i-arrow" /></svg></button>
       </div>
-      <span class="slide-counter" id="slideCounter">Slide 1 / 17</span>
-    </div>
-
-    <div style="font-size:0.75rem;color:#94a3b8;font-family:var(--font-mono);" class="key-hints">
-      Atajos: <strong>← / →</strong> Cambiar Slide · <strong>↓</strong> Siguiente País/Parada · <strong>M</strong> Modo Vista · <strong>N</strong> Notas · <strong>F</strong> Pantalla Completa
-    </div>
-
-    <div class="nav-btn-group">
-      <button class="nav-btn" id="prevSlideBtn">← Anterior</button>
-      <button class="nav-btn primary" id="nextSlideBtn">Siguiente Slide →</button>
-      <button class="nav-btn fly-next" id="nextStopBtn" title="Volar al siguiente destino del mapa">
-        ✈️ Volar a Siguiente Parada
-      </button>
-    </div>
-  </footer>
-
-  <!-- SPEAKER NOTES DRAWER -->
-  <aside class="notes-drawer" id="notesDrawer">
-    <div class="notes-header">
-      <span>🎙️ Notas del Expositor (Tecla N)</span>
-      <button class="hud-btn" onclick="document.getElementById('notesDrawer').classList.remove('open')" style="padding:2px 8px;">✕</button>
-    </div>
-    <div class="notes-body" id="notesBody"></div>
-  </aside>
-
-  <!-- FULLSCREEN FIGURE LIGHTBOX MODAL -->
-  <div class="lightbox-modal" id="lightboxModal" onclick="window.closeLightbox()">
-    <img id="lightboxImg" src="" alt="Figura científica ampliada" />
-    <div class="lightbox-caption" id="lightboxCaption"></div>
-    <button class="hud-btn" style="margin-top:14px;" onclick="window.closeLightbox()">✕ Cerrar Vista Ampliada (Esc)</button>
-  </div>
-
-  <!-- Scripts -->
-  <script src="slides-data.js"></script>
-  <script src="app.js"></script>
-</body>
+    </dialog>
+    <div class="sr-only" id="slideAnnouncement" aria-live="polite" aria-atomic="true"></div>
+    <div class="toast" id="toast" role="status" hidden></div>
+    <noscript><div class="no-script"><h1>De la UTEM para el mundo</h1><p>Sergio Ibarra-Espinosa · Charla y conversatorio, 17 de noviembre de 2026, Campus Ñuñoa.</p><p>Activa JavaScript para recorrer esta presentación interactiva. También puedes visitar <a href="https://ibarraespinosa.github.io/">el sitio de Sergio</a>.</p></div></noscript>
+  </body>
 </html>
